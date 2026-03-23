@@ -1,13 +1,15 @@
 ###############################################################################
-# gesture_recogniser.py — MediaPipe Hands gesture detection
+# gesture_recogniser.py — MediaPipe Hands gesture detection (Tasks API)
 #
-# Classifies one hand's landmarks into 6 gestures using finger extension logic.
-# Stability filter prevents accidental single-frame triggers.
+# Uses MediaPipe 0.10+ HandLandmarker (Tasks API).
+# On first run, downloads hand_landmarker.task model (~4 MB) automatically.
 ###############################################################################
 
 import logging
+import os
+import time
+import urllib.request
 from dataclasses import dataclass, field
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -15,86 +17,120 @@ import config
 
 log = logging.getLogger(__name__)
 
+MODEL_PATH = "hand_landmarker.task"
+MODEL_URL  = (
+    "https://storage.googleapis.com/mediapipe-models/"
+    "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
+)
+
 try:
     import mediapipe as mp
+    from mediapipe.tasks import python as mp_python
+    from mediapipe.tasks.python import vision as mp_vision
     _MP_AVAILABLE = True
 except ImportError:
     log.warning("mediapipe not installed — GestureRecogniser in SIMULATION mode")
     _MP_AVAILABLE = False
 
+# MediaPipe landmark indices
+_THUMB_TIP,  _THUMB_IP   = 4,  3
+_INDEX_TIP,  _INDEX_PIP  = 8,  6
+_MIDDLE_TIP, _MIDDLE_PIP = 12, 10
+_RING_TIP,   _RING_PIP   = 16, 14
+_PINKY_TIP,  _PINKY_PIP  = 20, 18
+
+# Connections used for drawing the hand skeleton
+_HAND_CONNECTIONS = [
+    (0,1),(1,2),(2,3),(3,4),
+    (0,5),(5,6),(6,7),(7,8),
+    (5,9),(9,10),(10,11),(11,12),
+    (9,13),(13,14),(14,15),(15,16),
+    (13,17),(17,18),(18,19),(19,20),
+    (0,17),
+]
+
 
 @dataclass
 class GestureResult:
-    name: str = "NONE"          # e.g. "OPEN_PALM", "FIST", "NONE"
-    confidence: float = 0.0     # 0.0 – 1.0
+    name: str = "NONE"
+    confidence: float = 0.0
     landmarks: object = field(default=None, repr=False)
-
-
-# MediaPipe landmark indices
-_THUMB_TIP, _THUMB_IP   = 4, 3
-_INDEX_TIP, _INDEX_PIP  = 8, 6
-_MIDDLE_TIP, _MIDDLE_PIP = 12, 10
-_RING_TIP, _RING_PIP    = 16, 14
-_PINKY_TIP, _PINKY_PIP  = 20, 18
 
 
 class GestureRecogniser:
     def __init__(self):
-        self._hands = None
-        self._mp_hands = None
-        self._mp_draw = None
+        self._landmarker  = None
         self._stable_count: int = 0
         self._last_raw: str = "NONE"
         self._stable_gesture: str = "NONE"
+        self._start_time_ms: int = 0
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _ensure_model(self) -> None:
+        if not os.path.exists(MODEL_PATH):
+            log.info("Downloading hand landmark model (~4 MB) ...")
+            urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+            log.info("Model saved to %s", MODEL_PATH)
 
     def start(self) -> None:
         if not _MP_AVAILABLE:
             log.info("GestureRecogniser: simulation mode (no MediaPipe)")
             return
-        self._mp_hands = mp.solutions.hands
-        self._mp_draw  = mp.solutions.drawing_utils
-        self._hands = self._mp_hands.Hands(
-            static_image_mode=False,
-            max_num_hands=1,
-            min_detection_confidence=0.7,
+
+        self._ensure_model()
+        self._start_time_ms = int(time.time() * 1000)
+
+        options = mp_vision.HandLandmarkerOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
+            running_mode=mp_vision.RunningMode.VIDEO,
+            num_hands=1,
+            min_hand_detection_confidence=0.7,
+            min_hand_presence_confidence=0.6,
             min_tracking_confidence=0.6,
         )
-        log.info("GestureRecogniser started")
+        self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
+        log.info("GestureRecogniser started (MediaPipe Tasks API)")
 
     def stop(self) -> None:
-        if self._hands:
-            self._hands.close()
-            self._hands = None
+        if self._landmarker:
+            self._landmarker.close()
+            self._landmarker = None
 
     # ------------------------------------------------------------------ #
     # Main entry point                                                     #
     # ------------------------------------------------------------------ #
 
     def process_frame(self, bgr_frame: np.ndarray) -> GestureResult:
-        if not _MP_AVAILABLE or self._hands is None:
+        if not _MP_AVAILABLE or self._landmarker is None:
             return GestureResult()
 
-        # MediaPipe expects RGB
-        rgb = cv2.cvtColor(cv2.flip(bgr_frame, 1), cv2.COLOR_BGR2RGB)
-        rgb.flags.writeable = False
-        results = self._hands.process(rgb)
-        rgb.flags.writeable = True
+        # Mirror + convert to RGB
+        flipped = cv2.flip(bgr_frame, 1)
+        rgb     = cv2.cvtColor(flipped, cv2.COLOR_BGR2RGB)
 
-        if not results.multi_hand_landmarks:
+        mp_image     = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        timestamp_ms = int(time.time() * 1000) - self._start_time_ms
+
+        detection = self._landmarker.detect_for_video(mp_image, timestamp_ms)
+
+        if not detection.hand_landmarks:
             self._apply_stability("NONE")
             return GestureResult(name=self._stable_gesture)
 
-        hand_landmarks = results.multi_hand_landmarks[0]
-        handedness = (results.multi_handedness[0].classification[0].label
-                      if results.multi_handedness else "Right")
+        landmarks  = detection.hand_landmarks[0]
+        handedness = (detection.handedness[0][0].category_name
+                      if detection.handedness else "Right")
 
-        raw_name, conf = self._classify(hand_landmarks, handedness)
+        raw_name, conf = self._classify(landmarks, handedness)
         self._apply_stability(raw_name)
 
         return GestureResult(
             name=self._stable_gesture,
             confidence=conf,
-            landmarks=hand_landmarks,
+            landmarks=landmarks,
         )
 
     # ------------------------------------------------------------------ #
@@ -111,25 +147,22 @@ class GestureRecogniser:
         if self._stable_count >= config.GESTURE_STABLE_FRAMES:
             self._stable_gesture = raw
         elif raw == "NONE":
-            # Reset immediately on hand loss
             self._stable_gesture = "NONE"
 
     # ------------------------------------------------------------------ #
     # Landmark classification                                              #
     # ------------------------------------------------------------------ #
 
-    def _classify(self, landmarks, handedness: str) -> tuple[str, float]:
-        lm = landmarks.landmark
+    def _classify(self, landmarks, handedness: str) -> tuple:
+        lm = landmarks
 
-        def finger_extended(tip_idx, pip_idx) -> bool:
-            return lm[tip_idx].y < lm[pip_idx].y
+        def finger_extended(tip, pip) -> bool:
+            return lm[tip].y < lm[pip].y
 
         def thumb_extended() -> bool:
-            # Compare x-axis; mirror for left hand
             if handedness == "Right":
                 return lm[_THUMB_TIP].x < lm[_THUMB_IP].x
-            else:
-                return lm[_THUMB_TIP].x > lm[_THUMB_IP].x
+            return lm[_THUMB_TIP].x > lm[_THUMB_IP].x
 
         thumb  = thumb_extended()
         index  = finger_extended(_INDEX_TIP,  _INDEX_PIP)
@@ -137,7 +170,6 @@ class GestureRecogniser:
         ring   = finger_extended(_RING_TIP,   _RING_PIP)
         pinky  = finger_extended(_PINKY_TIP,  _PINKY_PIP)
 
-        # Count how cleanly the detected pattern matches each gesture
         patterns = {
             "OPEN_PALM":     [True,  True,  True,  True,  True ],
             "FIST":          [False, False, False, False, False],
@@ -150,19 +182,14 @@ class GestureRecogniser:
 
         best_name, best_score = "NONE", 0.0
         for name, pattern in patterns.items():
-            matches = sum(
-                1 for expected, actual in zip(pattern, detected)
-                if expected is None or expected == actual
-            )
-            score = matches / len(pattern)
+            score = sum(
+                1 for e, a in zip(pattern, detected) if e is None or e == a
+            ) / len(pattern)
             if score > best_score:
-                best_score = score
-                best_name = name
+                best_score, best_name = score, name
 
-        # Require at least 4/5 match to avoid spurious detections
         if best_score < 0.8:
             return "NONE", 0.0
-
         return best_name, best_score
 
     # ------------------------------------------------------------------ #
@@ -171,18 +198,24 @@ class GestureRecogniser:
 
     def draw_landmarks(self, bgr_frame: np.ndarray, result: GestureResult) -> np.ndarray:
         frame = cv2.flip(bgr_frame.copy(), 1)
-        if _MP_AVAILABLE and result.landmarks and self._mp_draw:
-            self._mp_draw.draw_landmarks(
-                frame,
-                result.landmarks,
-                self._mp_hands.HAND_CONNECTIONS if self._mp_hands else None,
-            )
+        h, w  = frame.shape[:2]
+
+        if result.landmarks:
+            lm = result.landmarks
+            for a, b in _HAND_CONNECTIONS:
+                x1, y1 = int(lm[a].x * w), int(lm[a].y * h)
+                x2, y2 = int(lm[b].x * w), int(lm[b].y * h)
+                cv2.line(frame, (x1, y1), (x2, y2), (80, 80, 80), 1)
+            for point in lm:
+                cx, cy = int(point.x * w), int(point.y * h)
+                cv2.circle(frame, (cx, cy), 5, (255, 255, 255), -1)
+                cv2.circle(frame, (cx, cy), 5, (0, 128, 255),   1)
 
         colour = (0, 255, 0) if result.name != "NONE" else (128, 128, 128)
         cv2.putText(frame, f"Gesture: {result.name}",
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
+
         if result.name != "NONE" and result.name in config.GESTURE_BEHAVIOUR_MAP:
-            behaviour = config.GESTURE_BEHAVIOUR_MAP[result.name]
-            cv2.putText(frame, f"-> {behaviour}",
+            cv2.putText(frame, f"-> {config.GESTURE_BEHAVIOUR_MAP[result.name]}",
                         (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
         return frame
