@@ -39,18 +39,18 @@ myLSS2.move(-900)
 myLSS3.move(850)
 myLSS4.move(300)
 print("Move done.")
-time.sleep(1)
+time.sleep(0.03)
 
 #The following for the Gripper range (actuator 5)
-#for i in range(0,850):
-#    print("Trying position: " + str(i))
-#    myLSS.move(i*-1)
-#    time.sleep(.03) #0.03 seems to be  the minmum delay to get smooth movement on the Gripper
+for i in range(0,850):
+    print("Trying position: " + str(i))
+    myLSS.move(i*-1)
+    time.sleep(.03) #0.03 seems to be  the minmum delay to get smooth movement on the Gripper
 
 #The following for actuator 2 (bottom arm)
 # -900 is about parallel with ground
-# lss4Position = int(myLSS4.getPosition())
-# for i in range(-900,-450):
+ #lss4Position = int(myLSS4.getPosition())
+#for i in range(-900,-450):
     # print("Trying position: " + str(i))
     # myLSS2.move(i)
     # time.sleep(.03) #0.03 seems to be  the minmum delay to get smooth movement on the Gripper
@@ -59,8 +59,8 @@ time.sleep(1)
 
 #The following for actuator 3 (top arm)
 # 850 is parallel to bottom arm, 0 is straight up
-# for i in range(-850,0):
-    # print("Trying position: " + str(i))
+for i in range(-850,0):
+     print("Trying position: " + str(i))
     # myLSS3.move(i*-1)
     # time.sleep(.03) #0.03 seems to be  the minmum delay to get smooth movement on the Gripper
 
