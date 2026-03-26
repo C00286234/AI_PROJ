@@ -22,6 +22,7 @@
 
 import logging
 import sys
+import time
 
 import cv2
 import numpy as np
@@ -112,6 +113,8 @@ def main():
         arm.disconnect()
         recogniser.stop()
         sys.exit(1)
+
+    time.sleep(2)  # allow USB webcam to initialise before reading frames
 
     if vision_cap is None:
         log.warning("Workspace camera not found on index %d.", config.CAMERA_VISION_INDEX)
