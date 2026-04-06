@@ -88,6 +88,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
     engine = BehaviourEngine(arm)
+    last_triggered_gesture = "NONE"
     log.info("System ready. Show gestures to control the arm. Press Q to quit.")
 
     try:
@@ -98,10 +99,13 @@ def main():
 
             gesture_result = recogniser.process_frame(frame)
 
-            if gesture_result.name == "FIST":
-                engine.trigger_gesture("FIST")
-            elif gesture_result.name != "NONE":
-                engine.trigger_gesture(gesture_result.name)
+            # Only trigger on gesture CHANGE — not every frame it's held
+            if gesture_result.name != last_triggered_gesture:
+                if gesture_result.name == "FIST":
+                    engine.trigger_gesture("FIST")
+                elif gesture_result.name != "NONE":
+                    engine.trigger_gesture(gesture_result.name)
+                last_triggered_gesture = gesture_result.name
 
             engine.update()
 

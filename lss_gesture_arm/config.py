@@ -90,7 +90,7 @@ INTERPOLATION_STEP  = 5   # position delta per interpolation tick (smaller = smo
 INTERPOLATION_DELAY = 0.1   # seconds between ticks (higher = slower movement)
 
 # --- Gesture stability ---
-GESTURE_STABLE_FRAMES = 1   # consecutive identical detections required before firing
+GESTURE_STABLE_FRAMES = 8   # consecutive identical detections required before firing
 
 # --- Camera ---
 CAMERA_INDEX   = 0

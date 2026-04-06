@@ -7,6 +7,7 @@
 
 import logging
 import os
+import pickle
 import time
 import urllib.request
 from dataclasses import dataclass, field
@@ -22,6 +23,7 @@ MODEL_URL  = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
+SVM_MODEL_PATH = "model.pkl"
 
 try:
     import mediapipe as mp
@@ -53,6 +55,7 @@ _HAND_CONNECTIONS = [
 @dataclass
 class GestureResult:
     name: str = "NONE"
+    raw_name: str = "NONE"
     confidence: float = 0.0
     landmarks: object = field(default=None, repr=False)
 
@@ -60,6 +63,8 @@ class GestureResult:
 class GestureRecogniser:
     def __init__(self):
         self._landmarker  = None
+        self._svm = None
+        self._scaler = None
         self._stable_count: int = 0
         self._last_raw: str = "NONE"
         self._stable_gesture: str = "NONE"
@@ -92,7 +97,17 @@ class GestureRecogniser:
             min_tracking_confidence=0.6,
         )
         self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
-        log.info("GestureRecogniser started (MediaPipe Tasks API)")
+
+        # Load trained SVM classifier
+        if os.path.exists(SVM_MODEL_PATH):
+            with open(SVM_MODEL_PATH, "rb") as f:
+                bundle = pickle.load(f)
+            self._scaler = bundle["scaler"]
+            self._svm = bundle["svm"]
+            log.info("GestureRecogniser started (MediaPipe + trained SVM)")
+        else:
+            log.warning("No trained model found at %s — falling back to rules", SVM_MODEL_PATH)
+            log.info("GestureRecogniser started (MediaPipe Tasks API)")
 
     def stop(self) -> None:
         if self._landmarker:
@@ -129,6 +144,7 @@ class GestureRecogniser:
 
         return GestureResult(
             name=self._stable_gesture,
+            raw_name=raw_name,
             confidence=conf,
             landmarks=landmarks,
         )
@@ -154,6 +170,16 @@ class GestureRecogniser:
     # ------------------------------------------------------------------ #
 
     def _classify(self, landmarks, handedness: str) -> tuple:
+        if self._svm is not None:
+            # Trained SVM path: flatten landmarks into 63 features
+            features = []
+            for lm in landmarks:
+                features.extend([lm.x, lm.y, lm.z])
+            scaled = self._scaler.transform([features])
+            name = self._svm.predict(scaled)[0]
+            return name, 1.0
+
+        # Fallback: rule-based classification (used if model.pkl is missing)
         lm = landmarks
 
         def finger_extended(tip, pip) -> bool:
@@ -215,7 +241,12 @@ class GestureRecogniser:
         cv2.putText(frame, f"Gesture: {result.name}",
                     (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, colour, 2)
 
+        # Show raw SVM prediction (before stability filter)
+        raw_colour = (0, 255, 255) if result.raw_name != "NONE" else (128, 128, 128)
+        cv2.putText(frame, f"Raw: {result.raw_name}",
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, raw_colour, 2)
+
         if result.name != "NONE" and result.name in config.GESTURE_BEHAVIOUR_MAP:
             cv2.putText(frame, f"-> {config.GESTURE_BEHAVIOUR_MAP[result.name]}",
-                        (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
+                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 200, 255), 2)
         return frame
