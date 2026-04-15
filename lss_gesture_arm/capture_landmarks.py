@@ -26,7 +26,7 @@ MODEL_URL = (
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
 
-GESTURES = ["OPEN_PALM", "FIST", "PEACE", "THUMBS_UP", "POINT", "THREE_FINGERS"]
+GESTURES = ["OPEN_PALM", "FIST", "PEACE", "THUMBS_UP", "POINT"]
 SAMPLES_PER_GESTURE = 200
 CAPTURE_DELAY = 0.1          # seconds between captures (~100 ms)
 CAMERA_INDEX = 0

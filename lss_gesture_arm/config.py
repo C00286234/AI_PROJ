@@ -59,14 +59,6 @@ POSE_WAVE_B = {
     SERVO_GRIPPER:    0,
 }
 
-POSE_DEMO = {
-    SERVO_BASE:     200,
-    SERVO_BOTTOM:  -600,
-    SERVO_TOP:      500,
-    SERVO_WRIST:   -300,
-    SERVO_GRIPPER:  300,
-}
-
 POSE_REACH = {
     SERVO_BASE:      0,
     SERVO_BOTTOM:  -600,
@@ -104,5 +96,4 @@ GESTURE_BEHAVIOUR_MAP = {
     "PEACE":         "WAVE",
     "THUMBS_UP":     "BOW",
     "POINT":         "REACH",
-    "THREE_FINGERS": "DEMO_POSE",
 }

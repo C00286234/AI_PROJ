@@ -43,7 +43,7 @@ def main():
 
     # 4. Train SVM
     print("Training SVM...")
-    svm = SVC(kernel="rbf", C=10, gamma="scale", random_state=42)
+    svm = SVC(kernel="rbf", C=1, gamma="scale", random_state=42)
     svm.fit(X_train, y_train)
     print("Training complete.\n")
 

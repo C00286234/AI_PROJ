@@ -23,7 +23,6 @@ Camera -> MediaPipe (21 hand landmarks) -> SVM Classifier -> State Machine -> Ar
 | PEACE | Peace sign (index + middle up) | WAVE sequence |
 | THUMBS_UP | Thumbs up | BOW |
 | POINT | Index finger only up | REACH forward |
-| THREE_FINGERS | Index + middle + ring up | DEMO pose |
 
 ## Setup
 
@@ -93,7 +92,7 @@ lss_gesture_arm/
     lss_const.py            LSS protocol constants
     capture_landmarks.py    Data collection tool
     train_model.py          SVM training script
-    gestures_dataset.csv    Captured training data (1200 samples)
+    gestures_dataset.csv    Captured training data (1000 samples)
     model.pkl               Trained SVM model + scaler
     hand_landmarker.task    MediaPipe hand landmark model
     CODE_GUIDE.md           Detailed file-by-file code walkthrough

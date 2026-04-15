@@ -25,7 +25,6 @@ class State(Enum):
     WAVING         = auto()
     REACHING       = auto()
     BOWING         = auto()
-    DEMO_POSE      = auto()
     EMERGENCY_STOP = auto()
 
 
@@ -66,8 +65,6 @@ class BehaviourEngine:
             self._handle_reaching()
         elif self._state == State.BOWING:
             self._handle_bowing()
-        elif self._state == State.DEMO_POSE:
-            self._handle_demo()
 
         return self._state
 
@@ -99,8 +96,6 @@ class BehaviourEngine:
             self._transition(State.REACHING)
         elif gesture == "THUMBS_UP":
             self._transition(State.BOWING)
-        elif gesture == "THREE_FINGERS":
-            self._transition(State.DEMO_POSE)
 
     def _handle_homing(self) -> None:
         self._arm.go_home()
@@ -137,12 +132,6 @@ class BehaviourEngine:
             [config.SERVO_WRIST, config.SERVO_TOP,
              config.SERVO_BOTTOM, config.SERVO_BASE]
         )
-        time.sleep(1.0)
-        self._arm.go_ready()
-        self._transition(State.IDLE)
-
-    def _handle_demo(self) -> None:
-        self._arm.move_pose(config.POSE_DEMO, speed=config.FAST_SPEED)
         time.sleep(1.0)
         self._arm.go_ready()
         self._transition(State.IDLE)

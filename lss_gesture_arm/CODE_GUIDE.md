@@ -63,7 +63,7 @@ A complete walkthrough of every file in the project. The system uses a laptop ca
 | `lss_const.py` | LSS protocol constants (bundled, LGPL-3.0) |
 | `capture_landmarks.py` | Data collection tool: captures MediaPipe landmarks to CSV |
 | `train_model.py` | Trains SVM classifier on captured landmarks, outputs model.pkl |
-| `gestures_dataset.csv` | Training data: 1200 samples (200 per gesture x 6 gestures) |
+| `gestures_dataset.csv` | Training data: 1000 samples (200 per gesture x 5 gestures) |
 | `model.pkl` | Trained SVM model + StandardScaler (loaded at runtime) |
 | `hand_landmarker.task` | MediaPipe hand landmark model (~4 MB, auto-downloaded on first run) |
 

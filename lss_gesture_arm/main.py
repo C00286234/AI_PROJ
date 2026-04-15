@@ -7,7 +7,6 @@
 #   PEACE         → WAVE sequence
 #   THUMBS UP     → BOW
 #   POINT         → REACH forward
-#   THREE FINGERS → DEMO pose
 #   Q key         → Quit cleanly
 #   C key         → Clear emergency stop
 ###############################################################################
@@ -36,7 +35,6 @@ _GESTURE_LEGEND = [
     ("PEACE",         "WAVE"),
     ("THUMBS_UP",     "BOW"),
     ("POINT",         "REACH"),
-    ("THREE_FINGERS", "DEMO POSE"),
 ]
 
 

@@ -202,7 +202,6 @@ class GestureRecogniser:
             "PEACE":         [None,  True,  True,  False, False],
             "THUMBS_UP":     [True,  False, False, False, False],
             "POINT":         [None,  True,  False, False, False],
-            "THREE_FINGERS": [None,  True,  True,  True,  False],
         }
         detected = [thumb, index, middle, ring, pinky]
 
