@@ -5,7 +5,7 @@
 ###############################################################################
 
 # --- Serial ---
-SERIAL_PORT = "COM12"
+SERIAL_PORT = "COM13"
 SERIAL_BAUD = 115200  # lssc.LSS_DefaultBaud
 
 # --- Servo IDs ---
@@ -76,13 +76,16 @@ POSE_BOW = {
 }
 
 # --- Movement ---
-DEFAULT_SPEED       = 50    # tenths-of-degrees per second (slow and safe)
-FAST_SPEED          = 100   # used for wave / demo
-INTERPOLATION_STEP  = 5   # position delta per interpolation tick (smaller = smoother)
-INTERPOLATION_DELAY = 0.1   # seconds between ticks (higher = slower movement)
+# Max speed is set on each servo at startup using the LSS built-in motion controller.
+# Units: tenths-of-degrees per second. 370 = 37 deg/s (smooth and controlled).
+SERVO_MAX_SPEED = 370
+
+# How long to wait for each move to complete before returning from move_servo_smooth.
+# Must be long enough for the slowest movement to finish.
+MOVE_COMPLETION_TIMEOUT = 2.5   # seconds
 
 # --- Gesture stability ---
-GESTURE_STABLE_FRAMES = 8   # consecutive identical detections required before firing
+GESTURE_STABLE_FRAMES = 20   # consecutive identical detections required before firing
 
 # --- Camera ---
 CAMERA_INDEX   = 0

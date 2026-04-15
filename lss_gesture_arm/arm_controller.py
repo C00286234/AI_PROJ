@@ -41,6 +41,9 @@ class _FakeServo:
     def hold(self):
         pass
 
+    def setMaxSpeed(self, speed):
+        pass
+
 
 class ArmController:
     def __init__(self):
@@ -63,6 +66,13 @@ class ArmController:
             else:
                 for sid in config.ALL_SERVO_IDS:
                     self._servos[sid] = _FakeServo(sid)
+
+            # Set each servo's built-in max speed (smooth motion handled on-servo)
+            for sid in config.ALL_SERVO_IDS:
+                try:
+                    self._servos[sid].setMaxSpeed(config.SERVO_MAX_SPEED)
+                except Exception as exc:
+                    log.warning("setMaxSpeed failed on servo %d: %s", sid, exc)
 
             # Sync position cache from hardware
             for sid in config.ALL_SERVO_IDS:
@@ -129,56 +139,55 @@ class ArmController:
             log.error("move_servo(%d, %d) failed: %s", servo_id, position, exc)
             self._connected = False
 
-    def move_servo_smooth(self, servo_id: int, target: int,
-                          step: int = config.INTERPOLATION_STEP,
-                          delay: float = config.INTERPOLATION_DELAY) -> None:
-        """Interpolated move from current position to target.
-        Checks _estop on every tick — maximum 30 ms response latency."""
+    def move_servo_smooth(self, servo_id: int, target: int) -> None:
+        """Move to target using the servo's built-in smooth motion controller.
+        One command, no software interpolation — the servo itself handles acceleration
+        and deceleration based on its configured max speed.
+        Blocks until the servo reports it has reached the target (or timeout)."""
+        if self._estop:
+            return
+
         target = self.clamp(servo_id, target)
         current = self._current_positions.get(servo_id, 0)
 
         if current == target:
             return
 
-        direction = 1 if target > current else -1
+        try:
+            self._servos[servo_id].move(target)
+            self._current_positions[servo_id] = target
+        except Exception as exc:
+            log.error("move_servo_smooth(%d): %s", servo_id, exc)
+            self._connected = False
+            return
 
-        pos = current
-        while True:
+        # Poll until servo reaches target or timeout expires.
+        # E-stop is also checked every poll tick for fast abort.
+        deadline = time.time() + config.MOVE_COMPLETION_TIMEOUT
+        while time.time() < deadline:
             if self._estop:
                 log.info("move_servo_smooth: aborted by estop (servo %d)", servo_id)
                 return
-
-            pos += direction * step
-            # Overshoot guard
-            if (direction == 1 and pos >= target) or (direction == -1 and pos <= target):
-                pos = target
-
             try:
-                self._servos[servo_id].move(pos)
-                self._current_positions[servo_id] = pos
-            except Exception as exc:
-                log.error("move_servo_smooth(%d): %s", servo_id, exc)
-                self._connected = False
-                return
+                actual = int(self._servos[servo_id].getPosition())
+                if abs(actual - target) <= 20:   # close enough
+                    return
+            except Exception:
+                pass
+            time.sleep(0.05)
 
-            if pos == target:
-                break
-            time.sleep(delay)
-
-    def move_pose_sequential(self, pose: dict, order: list,
-                             speed: int = config.DEFAULT_SPEED) -> None:
+    def move_pose_sequential(self, pose: dict, order: list) -> None:
         """Move servos in a specified order (safety-critical for multi-joint moves).
         Blocks until all servos reach their targets."""
-        step = max(10, config.INTERPOLATION_STEP * (speed // config.DEFAULT_SPEED))
         for sid in order:
             if sid in pose:
-                self.move_servo_smooth(sid, pose[sid], step=step)
+                self.move_servo_smooth(sid, pose[sid])
             if self._estop:
                 return
 
-    def move_pose(self, pose: dict, speed: int = config.DEFAULT_SPEED) -> None:
+    def move_pose(self, pose: dict) -> None:
         """Move all servos in pose using default safe order."""
-        self.move_pose_sequential(pose, config.ALL_SERVO_IDS, speed=speed)
+        self.move_pose_sequential(pose, config.ALL_SERVO_IDS)
 
     # ------------------------------------------------------------------ #
     # Named pose helpers                                                   #

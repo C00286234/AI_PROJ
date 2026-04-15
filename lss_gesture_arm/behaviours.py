@@ -110,8 +110,7 @@ class BehaviourEngine:
             config.POSE_HOME,
         ]
         if self._wave_step < len(wave_sequence):
-            self._arm.move_pose(wave_sequence[self._wave_step],
-                                speed=config.FAST_SPEED)
+            self._arm.move_pose(wave_sequence[self._wave_step])
             self._wave_step += 1
         else:
             self._transition(State.IDLE)
