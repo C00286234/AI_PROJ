@@ -5,7 +5,7 @@
 ###############################################################################
 
 # --- Serial ---
-SERIAL_PORT = "COM13"
+SERIAL_PORT = "COM11"
 SERIAL_BAUD = 115200  # lssc.LSS_DefaultBaud
 
 # --- Servo IDs ---
@@ -61,10 +61,10 @@ POSE_WAVE_B = {
 
 POSE_REACH = {
     SERVO_BASE:      0,
-    SERVO_BOTTOM:  -600,
-    SERVO_TOP:      600,
-    SERVO_WRIST:   -100,
-    SERVO_GRIPPER:    0,
+    SERVO_BOTTOM:  0,
+    SERVO_TOP:      0,
+    SERVO_WRIST:   0,
+    SERVO_GRIPPER:    100,
 }
 
 POSE_BOW = {
