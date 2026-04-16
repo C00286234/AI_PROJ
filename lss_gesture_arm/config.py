@@ -61,10 +61,10 @@ POSE_WAVE_B = {
 
 POSE_REACH = {
     SERVO_BASE:      0,
-    SERVO_BOTTOM:  0,
-    SERVO_TOP:      0,
-    SERVO_WRIST:   0,
-    SERVO_GRIPPER:    100,
+    SERVO_BOTTOM:  -600,
+    SERVO_TOP:      600,
+    SERVO_WRIST:   -100,
+    SERVO_GRIPPER:    0,
 }
 
 POSE_BOW = {
