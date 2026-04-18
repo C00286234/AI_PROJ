@@ -177,7 +177,7 @@ class GestureRecogniser:
                 features.extend([lm.x, lm.y, lm.z])
             scaled = self._scaler.transform([features])
             name = self._svm.predict(scaled)[0]
-            return name, 1.0
+            return self._canonical_label(name), 1.0
 
         # Fallback: rule-based classification (used if model.pkl is missing)
         lm = landmarks
@@ -205,8 +205,6 @@ class GestureRecogniser:
             "PEACE":         [None,  True,  True,  False, False],
             "THUMBS_UP":     [True,  False, False, False, False],
             "POINT":         [None,  True,  False, False, False],
-``            "ONE_FINGER":    [None,  True,  False, False, False],
-            "TWO_FINGERS":   [None,  True,  True,  False, False],
             "THREE_FINGERS": [None,  True,  True,  True,  False],
             "FOUR_FINGERS":  [False, True,  True,  True,  True ],
             "L_SHAPE":       [True,  True,  False, False, False],
@@ -233,7 +231,14 @@ class GestureRecogniser:
         if best_name == "L_SHAPE" and thumb_down():
             return "UPSIDE_DOWN_L_SHAPE", best_score
 
-        return best_name, best_score
+        return self._canonical_label(best_name), best_score
+
+    def _canonical_label(self, name: str) -> str:
+        aliases = {
+            "ONE_FINGER": "POINT",
+            "TWO_FINGERS": "PEACE",
+        }
+        return aliases.get(name, name)
 
     # ------------------------------------------------------------------ #
     # Drawing                                                              #

@@ -18,13 +18,23 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
-CSV_FILE = "gestures_dataset.csv"
-MODEL_FILE = "model.pkl"
+CSV_FILE = "Camera Module/model+dataset/gestures_dataset.csv"
+MODEL_FILE = "Camera Module/model+dataset/model.pkl"
+
+LABEL_ALIASES = {
+    "ONE_FINGER": "POINT",
+    "TWO_FINGERS": "PEACE",
+}
 
 
 def main():
     # 1. Load dataset
     df = pd.read_csv(CSV_FILE)
+
+    # Canonicalize aliases to avoid splitting the same gesture across labels.
+    if "label" in df.columns:
+        df["label"] = df["label"].replace(LABEL_ALIASES)
+
     print(f"Loaded {len(df)} samples, {df['label'].nunique()} gestures")
     print(f"Gestures: {sorted(df['label'].unique())}\n")
 

@@ -41,17 +41,15 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 _GESTURE_LEGEND = [
-    ("OPEN_PALM",     "HOME"),
-    ("FIST",          "EMERGENCY STOP"),
-    ("PEACE",         "WAVE"),
-    ("THUMBS_UP",     "BOW"),
-    ("POINT",         "REACH"),
-]
-
-_MANUAL_LEGEND = [
-    ("J / L", "Base Left / Right"),
-    ("I / K", "Middle Up / Down"),
-    ("O / P", "Gripper Open / Close"),
+    ("AUTO: FIST",        "EMERGENCY STOP"),
+    ("MANUAL: FIST",      "GRIPPER CLOSE"),
+    ("THUMBS_UP",     "Switch -> AUTOMATIC"),
+    ("THUMBS_DOWN",   "Switch -> MANUAL"),
+    ("AUTO: OPEN_PALM",   "HOME"),
+    ("AUTO: POINT/PEACE/3", "WAVE / REACH / BOW"),
+    ("MANUAL: L / inv-L",   "MIDDLE UP / DOWN"),
+    ("MANUAL: OPEN_PALM",   "GRIPPER OPEN"),
+    ("MANUAL: POINT/PEACE", "ROTATE LEFT / RIGHT"),
 ]
 
 
@@ -79,13 +77,6 @@ def draw_legend(frame: np.ndarray) -> np.ndarray:
         cv2.putText(frame, f"{gesture}: {behaviour}", (10, y),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
         y += 22
-
-    x2 = max(10, w - 280)
-    y2 = h - len(_MANUAL_LEGEND) * 22 - 10
-    for keybind, action in _MANUAL_LEGEND:
-        cv2.putText(frame, f"{keybind}: {action}", (x2, y2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-        y2 += 22
     return frame
 
 
@@ -110,9 +101,8 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
 
     engine = BehaviourEngine(arm)
-    last_triggered_gesture = "NONE"
     log.info("System ready. Show gestures to control the arm. Press Q to quit.")
-    log.info("Manual controls: J/L base, I/K middle, O/P gripper")
+    log.info("Default mode: AUTOMATIC")
 
     try:
         while True:
@@ -122,20 +112,14 @@ def main():
 
             gesture_result = recogniser.process_frame(frame)
 
-            base_dir = 0
-            middle_dir = 0
-            gripper_dir = 0
-
-            # Only trigger on gesture CHANGE — not every frame it's held
-            if gesture_result.name != last_triggered_gesture:
-                if gesture_result.name == "FIST":
-                    engine.trigger_gesture("FIST")
-                elif gesture_result.name != "NONE":
-                    engine.trigger_gesture(gesture_result.name)
-                last_triggered_gesture = gesture_result.name
+            # Feed current gesture every frame so manual mode can be continuous.
+            engine.trigger_gesture(gesture_result.name)
+            engine.update()
 
             display = recogniser.draw_landmarks(frame, gesture_result)
             display = draw_hud(display, engine.get_state_name())
+            cv2.putText(display, f"MODE: {engine.get_mode_name()}",
+                        (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 220, 220), 2)
             display = draw_legend(display)
 
             cv2.imshow("LSS Gesture Arm Control", display)
@@ -147,23 +131,6 @@ def main():
             elif key == ord('c'):
                 arm.clear_estop()
                 log.info("E-stop manually cleared via keyboard")
-            elif key == ord('j'):
-                base_dir = -1
-            elif key == ord('l'):
-                base_dir = 1
-            elif key == ord('i'):
-                middle_dir = 1
-            elif key == ord('k'):
-                middle_dir = -1
-            elif key == ord('o'):
-                gripper_dir = -1
-            elif key == ord('p'):
-                gripper_dir = 1
-
-            engine.set_manual_input(base_dir=base_dir,
-                                    middle_dir=middle_dir,
-                                    gripper_dir=gripper_dir)
-            engine.update()
 
     except KeyboardInterrupt:
         log.info("Interrupted by user")

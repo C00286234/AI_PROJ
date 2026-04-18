@@ -204,7 +204,7 @@ class ArmController:
         """Manual middle-joint control (bottom servo): -1 down, +1 up."""
         if direction == 0:
             return
-        self.nudge_servo(config.SERVO_BOTTOM, step if direction > 0 else -step)
+        self.nudge_servo(config.SERVO_MIDDLE, step if direction > 0 else -step)
 
     def move_gripper_manual(self, direction: int, step: int = 18) -> None:
         """Manual gripper control: -1 open, +1 close."""
@@ -220,13 +220,13 @@ class ArmController:
         # Safe order: wrist first, then fold top, lower bottom, centre base
         self.move_pose_sequential(config.POSE_HOME,
                                   [config.SERVO_WRIST, config.SERVO_TOP,
-                                   config.SERVO_BOTTOM, config.SERVO_BASE,
+                                   config.SERVO_MIDDLE, config.SERVO_BASE,
                                    config.SERVO_GRIPPER])
 
     def go_ready(self) -> None:
         self.move_pose_sequential(config.POSE_READY,
                                   [config.SERVO_WRIST, config.SERVO_TOP,
-                                   config.SERVO_BOTTOM, config.SERVO_BASE,
+                                   config.SERVO_MIDDLE, config.SERVO_BASE,
                                    config.SERVO_GRIPPER])
 
     def gripper_open(self) -> None:

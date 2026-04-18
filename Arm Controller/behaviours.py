@@ -1,11 +1,27 @@
 ###############################################################################
-# behaviours.py — State machine for high-level arm behaviours
+# behaviours.py — Mode-aware state machine for high-level arm behaviours
 #
-# Gesture-only control. No camera-guided pick-up or colour detection.
+# Modes:
+#   - AUTOMATIC (default on startup)
+#   - MANUAL
 #
-# State transition rules:
-#   - FIST → EMERGENCY_STOP from ANY state (checked first in update())
-#   - OPEN_PALM clears estop and returns to IDLE
+# Gesture rules:
+#   - FIST        -> EMERGENCY_STOP (automatic mode), GRIPPER_CLOSE (manual mode)
+#   - THUMBS_UP   -> AUTOMATIC mode
+#   - THUMBS_DOWN -> MANUAL mode
+#
+# AUTOMATIC mode:
+#   - OPEN_PALM     -> HOME (reset pose)
+#   - POINT         -> WAVE
+#   - PEACE         -> REACH
+#   - THREE_FINGERS -> BOW
+#
+# MANUAL mode (continuous while held):
+#   - L_SHAPE             -> middle up
+#   - UPSIDE_DOWN_L_SHAPE -> middle down
+#   - OPEN_PALM           -> gripper open
+#   - POINT               -> base rotate left
+#   - PEACE               -> base rotate right
 ###############################################################################
 
 import time
@@ -34,7 +50,13 @@ class BehaviourEngine:
         self._state: State = State.IDLE
         self._state_entry_time: float = time.time()
         self._wave_step: int = 0
+
         self._pending_gesture: Optional[str] = None
+        self._last_gesture: str = "NONE"
+
+        self._mode: str = "AUTOMATIC"  # default startup mode
+
+        # Manual direction channels; keyboard/manual input can still set these.
         self._manual_base_dir: int = 0
         self._manual_middle_dir: int = 0
         self._manual_gripper_dir: int = 0
@@ -44,7 +66,7 @@ class BehaviourEngine:
     # ------------------------------------------------------------------ #
 
     def trigger_gesture(self, gesture_name: str) -> None:
-        self._pending_gesture = gesture_name
+        self._pending_gesture = gesture_name or "NONE"
 
     def set_manual_input(self, base_dir: int = 0, middle_dir: int = 0,
                          gripper_dir: int = 0) -> None:
@@ -53,20 +75,36 @@ class BehaviourEngine:
         self._manual_gripper_dir = 1 if gripper_dir > 0 else -1 if gripper_dir < 0 else 0
 
     def update(self) -> State:
-        gesture = self._pending_gesture
+        gesture = self._pending_gesture or "NONE"
         self._pending_gesture = None
 
-        # Automatic Mode
-        # FIST overrides everything, always
-        if gesture == "FIST" and self._state != State.EMERGENCY_STOP:
+        is_new_gesture = gesture != self._last_gesture
+        self._last_gesture = gesture
+
+        # FIST behavior:
+        # - AUTOMATIC mode: emergency stop
+        # - MANUAL mode: gripper close command
+        if gesture == "FIST" and self._mode != "MANUAL" and self._state != State.EMERGENCY_STOP:
             self._arm.emergency_stop()
             self._transition(State.EMERGENCY_STOP)
             return self._state
 
+        # Mode switching gestures.
+        if gesture == "THUMBS_UP" and self._mode != "AUTOMATIC":
+            self._mode = "AUTOMATIC"
+            self._reset_manual_dirs()
+            log.info("Control mode -> AUTOMATIC")
+        elif gesture == "THUMBS_DOWN" and self._mode != "MANUAL":
+            self._mode = "MANUAL"
+            log.info("Control mode -> MANUAL")
+
         if self._state == State.EMERGENCY_STOP:
             self._handle_estop(gesture)
-        elif self._state == State.IDLE:
-            self._handle_idle(gesture)
+            self._reset_manual_dirs()
+            return self._state
+
+        if self._state == State.IDLE:
+            self._handle_idle(gesture, is_new_gesture)
         elif self._state == State.HOMING:
             self._handle_homing()
         elif self._state == State.WAVING:
@@ -76,7 +114,10 @@ class BehaviourEngine:
         elif self._state == State.BOWING:
             self._handle_bowing()
 
-        # Manual mode: continuous step control while command is held.
+        # Manual mode is continuous while gesture/keys are held.
+        if self._mode == "MANUAL" and not self._arm.is_estopped() and self._state == State.IDLE:
+            self._manual_from_gesture(gesture)
+
         if self._state != State.EMERGENCY_STOP and not self._arm.is_estopped():
             if self._manual_base_dir != 0:
                 self._arm.rotate_base_manual(self._manual_base_dir)
@@ -93,28 +134,37 @@ class BehaviourEngine:
     def get_state_name(self) -> str:
         return self._state.name
 
+    def get_mode_name(self) -> str:
+        return self._mode
+
     # ------------------------------------------------------------------ #
     # State handlers                                                       #
     # ------------------------------------------------------------------ #
 
-    def _handle_estop(self, gesture: Optional[str]) -> None:
+    def _handle_estop(self, gesture: str) -> None:
         if gesture == "OPEN_PALM":
             self._arm.clear_estop()
             log.info("E-stop cleared by OPEN_PALM")
             self._transition(State.IDLE)
 
-    def _handle_idle(self, gesture: Optional[str]) -> None:
-        if gesture is None:
+    def _handle_idle(self, gesture: str, is_new_gesture: bool) -> None:
+        if gesture == "NONE":
+            if self._mode == "MANUAL":
+                self._reset_manual_dirs()
             return
-        if gesture == "OPEN_PALM":
-            self._transition(State.HOMING)
-        elif gesture in ("PEACE", "TWO_FINGERS"):
-            self._wave_step = 0
-            self._transition(State.WAVING)
-        elif gesture in ("POINT", "ONE_FINGER"):
-            self._transition(State.REACHING)
-        elif gesture == "THUMBS_UP":
-            self._transition(State.BOWING)
+
+        if self._mode == "AUTOMATIC":
+            if gesture == "OPEN_PALM" and is_new_gesture:
+                self._transition(State.HOMING)
+            elif gesture == "POINT" and is_new_gesture:
+                self._wave_step = 0
+                self._transition(State.WAVING)
+            elif gesture == "PEACE" and is_new_gesture:
+                self._transition(State.REACHING)
+            elif gesture == "THREE_FINGERS" and is_new_gesture:
+                self._transition(State.BOWING)
+            else:
+                self._reset_manual_dirs()
 
     def _handle_homing(self) -> None:
         self._arm.go_home()
@@ -138,7 +188,7 @@ class BehaviourEngine:
         self._arm.move_pose_sequential(
             config.POSE_REACH,
             [config.SERVO_WRIST, config.SERVO_TOP,
-             config.SERVO_BOTTOM, config.SERVO_BASE]
+             config.SERVO_MIDDLE, config.SERVO_BASE]
         )
         time.sleep(1.0)
         self._arm.go_ready()
@@ -148,11 +198,36 @@ class BehaviourEngine:
         self._arm.move_pose_sequential(
             config.POSE_BOW,
             [config.SERVO_WRIST, config.SERVO_TOP,
-             config.SERVO_BOTTOM, config.SERVO_BASE]
+             config.SERVO_MIDDLE, config.SERVO_BASE]
         )
         time.sleep(1.0)
         self._arm.go_ready()
         self._transition(State.IDLE)
+
+    # ------------------------------------------------------------------ #
+    # Manual helpers                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _manual_from_gesture(self, gesture: str) -> None:
+        self._reset_manual_dirs()
+
+        if gesture == "L_SHAPE":
+            self._manual_middle_dir = 1
+        elif gesture == "UPSIDE_DOWN_L_SHAPE":
+            self._manual_middle_dir = -1
+        elif gesture == "OPEN_PALM":
+            self._manual_gripper_dir = -1
+        elif gesture == "FIST":
+            self._manual_gripper_dir = 1
+        elif gesture == "POINT":
+            self._manual_base_dir = -1
+        elif gesture == "PEACE":
+            self._manual_base_dir = 1
+
+    def _reset_manual_dirs(self) -> None:
+        self._manual_base_dir = 0
+        self._manual_middle_dir = 0
+        self._manual_gripper_dir = 0
 
     # ------------------------------------------------------------------ #
     # Utilities                                                            #
