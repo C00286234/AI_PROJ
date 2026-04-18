@@ -1,0 +1,161 @@
+###############################################################################
+# behaviours.py — State machine for high-level arm behaviours
+#
+# Gesture-only control. No camera-guided pick-up or colour detection.
+#
+# State transition rules:
+#   - FIST → EMERGENCY_STOP from ANY state (checked first in update())
+#   - OPEN_PALM clears estop and returns to IDLE
+###############################################################################
+
+import time
+import logging
+from enum import Enum, auto
+from typing import Optional
+
+import config
+from arm_controller import ArmController
+
+log = logging.getLogger(__name__)
+
+
+class State(Enum):
+    IDLE           = auto()
+    HOMING         = auto()
+    WAVING         = auto()
+    REACHING       = auto()
+    BOWING         = auto()
+    EMERGENCY_STOP = auto()
+
+
+class BehaviourEngine:
+    def __init__(self, arm: ArmController):
+        self._arm = arm
+        self._state: State = State.IDLE
+        self._state_entry_time: float = time.time()
+        self._wave_step: int = 0
+        self._pending_gesture: Optional[str] = None
+
+        self._rotate_direction: int = 0    # -1 for left, +1 for right, 0 for none
+        self._rotate_speed: int = 10      # degrees per second, adjust as needed
+
+    ## Custom Functions for Manual Movement
+    def rotate_base(self, direction: int):
+        self._rotate_direction = direction
+
+    # ------------------------------------------------------------------ #
+    # Public interface                                                   #
+    # ------------------------------------------------------------------ #
+
+    def trigger_gesture(self, gesture_name: str) -> None:
+        self._pending_gesture = gesture_name
+
+    def update(self) -> State:
+        gesture = self._pending_gesture
+        self._pending_gesture = None
+
+        # Automatic Mode
+        # FIST overrides everything, always
+        if gesture == "FIST" and self._state != State.EMERGENCY_STOP:
+            self._arm.emergency_stop()
+            self._transition(State.EMERGENCY_STOP)
+            return self._state
+
+        if self._state == State.EMERGENCY_STOP:
+            self._handle_estop(gesture)
+        elif self._state == State.IDLE:
+            self._handle_idle(gesture)
+        elif self._state == State.HOMING:
+            self._handle_homing()
+        elif self._state == State.WAVING:
+            self._handle_waving()
+        elif self._state == State.REACHING:
+            self._handle_reaching()
+        elif self._state == State.BOWING:
+            self._handle_bowing()
+
+        # Manual Mode
+        if self._rotate_direction !=0 and not self._arm.is_estopped():
+            self._arm.r
+
+        return self._state
+
+    def get_state(self) -> State:
+        return self._state
+
+    def get_state_name(self) -> str:
+        return self._state.name
+
+    # ------------------------------------------------------------------ #
+    # State handlers                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _handle_estop(self, gesture: Optional[str]) -> None:
+        if gesture == "OPEN_PALM":
+            self._arm.clear_estop()
+            log.info("E-stop cleared by OPEN_PALM")
+            self._transition(State.IDLE)
+
+    def _handle_idle(self, gesture: Optional[str]) -> None:
+        if gesture is None:
+            return
+        if gesture == "OPEN_PALM":
+            self._transition(State.HOMING)
+        elif gesture == "PEACE":
+            self._wave_step = 0
+            self._transition(State.WAVING)
+        elif gesture == "POINT":
+            self._transition(State.REACHING)
+        elif gesture == "THUMBS_UP":
+            self._transition(State.BOWING)
+
+    def _handle_homing(self) -> None:
+        self._arm.go_home()
+        self._transition(State.IDLE)
+
+    def _handle_waving(self) -> None:
+        wave_sequence = [
+            config.POSE_WAVE_A,
+            config.POSE_WAVE_B,
+            config.POSE_WAVE_A,
+            config.POSE_WAVE_B,
+            config.POSE_HOME,
+        ]
+        if self._wave_step < len(wave_sequence):
+            self._arm.move_pose(wave_sequence[self._wave_step])
+            self._wave_step += 1
+        else:
+            self._transition(State.IDLE)
+
+    def _handle_reaching(self) -> None:
+        self._arm.move_pose_sequential(
+            config.POSE_REACH,
+            [config.SERVO_WRIST, config.SERVO_TOP,
+             config.SERVO_BOTTOM, config.SERVO_BASE]
+        )
+        time.sleep(1.0)
+        self._arm.go_ready()
+        self._transition(State.IDLE)
+
+    def _handle_bowing(self) -> None:
+        self._arm.move_pose_sequential(
+            config.POSE_BOW,
+            [config.SERVO_WRIST, config.SERVO_TOP,
+             config.SERVO_BOTTOM, config.SERVO_BASE]
+        )
+        time.sleep(1.0)
+        self._arm.go_ready()
+        self._transition(State.IDLE)
+
+    # ------------------------------------------------------------------ #
+    # Utilities                                                            #
+    # ------------------------------------------------------------------ #
+
+    def _transition(self, new_state: State) -> None:
+        if new_state != self._state:
+            log.info("State: %s -> %s", self._state.name, new_state.name)
+        self._state = new_state
+        self._state_entry_time = time.time()
+
+    def _time_in_state(self) -> float:
+        return time.time() - self._state_entry_time

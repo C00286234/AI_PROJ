@@ -37,8 +37,7 @@ pip install mediapipe opencv-python numpy pandas scikit-learn pyserial
 Hold each gesture in front of the camera. The script captures 200 samples per gesture (~20 seconds each).
 
 ```bash
-cd lss_gesture_arm
-python capture_landmarks.py
+python "Camera Module/capture_landmarks.py"
 ```
 
 Controls: SPACE = start capturing, S = skip gesture, Q = quit
@@ -46,10 +45,10 @@ Controls: SPACE = start capturing, S = skip gesture, Q = quit
 ### 3. Train the classifier
 
 ```bash
-python train_model.py
+python "Camera Module/train_model.py"
 ```
 
-This trains an SVM on the captured landmarks and saves `model.pkl`. You should see accuracy and a confusion matrix printed.
+This trains an SVM on the captured landmarks and saves `Camera Module/model+dataset/model.pkl`. You should see accuracy and a confusion matrix printed.
 
 ### 4. Run the system
 
@@ -64,13 +63,13 @@ Controls: Q = quit, C = clear emergency stop
 If accuracy drops (different lighting, different person, etc.), re-capture and retrain:
 
 ```bash
-python capture_landmarks.py   # appends new data to the CSV
-python train_model.py          # retrains on all data
+python "Camera Module/capture_landmarks.py"   # appends new data to the CSV
+python "Camera Module/train_model.py"         # retrains on all data
 ```
 
 ## Configuration
 
-All tuneable values are in `config.py`:
+All tuneable values are in `Arm Controller/config.py`:
 
 - `SERIAL_PORT` — COM port for the arm (default: COM12)
 - `CAMERA_INDEX` — camera index (default: 0)
@@ -82,20 +81,25 @@ All tuneable values are in `config.py`:
 ## Project Structure
 
 ```
-lss_gesture_arm/
-    main.py                 Entry point and main loop
-    gesture_recogniser.py   MediaPipe + SVM gesture classification
-    behaviours.py           7-state machine (IDLE, HOMING, WAVING, etc.)
-    arm_controller.py       Servo control with safety clamping
-    config.py               All constants and poses
-    lss.py                  Lynxmotion serial protocol library
-    lss_const.py            LSS protocol constants
-    capture_landmarks.py    Data collection tool
-    train_model.py          SVM training script
-    gestures_dataset.csv    Captured training data (1000 samples)
-    model.pkl               Trained SVM model + scaler
-    hand_landmarker.task    MediaPipe hand landmark model
-    CODE_GUIDE.md           Detailed file-by-file code walkthrough
+AI_PROJ/
+    main.py
+    hand_landmarker.task
+    gestures_dataset.csv
+    Arm Controller/
+        arm_controller.py
+        behaviours.py
+        config.py
+        lss.py
+        lss_const.py
+    Camera Module/
+        gesture_recogniser.py
+        capture_landmarks.py
+        train_model.py
+        model+dataset/
+            gestures_dataset.csv
+            model.pkl
+    Docs/
+        CODE_GUIDE.md
 ```
 
 ## Safety
