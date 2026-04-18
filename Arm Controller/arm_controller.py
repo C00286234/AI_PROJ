@@ -189,6 +189,29 @@ class ArmController:
         """Move all servos in pose using default safe order."""
         self.move_pose_sequential(pose, config.ALL_SERVO_IDS)
 
+    def nudge_servo(self, servo_id: int, delta: int) -> None:
+        """Move a servo by a small delta from its current position."""
+        current = self._current_positions.get(servo_id, self.get_position(servo_id))
+        self.move_servo(servo_id, current + int(delta))
+
+    def rotate_base_manual(self, direction: int, step: int = 18) -> None:
+        """Manual base control: direction -1 = left, +1 = right."""
+        if direction == 0:
+            return
+        self.nudge_servo(config.SERVO_BASE, step if direction > 0 else -step)
+
+    def move_middle_manual(self, direction: int, step: int = 18) -> None:
+        """Manual middle-joint control (bottom servo): -1 down, +1 up."""
+        if direction == 0:
+            return
+        self.nudge_servo(config.SERVO_BOTTOM, step if direction > 0 else -step)
+
+    def move_gripper_manual(self, direction: int, step: int = 18) -> None:
+        """Manual gripper control: -1 open, +1 close."""
+        if direction == 0:
+            return
+        self.nudge_servo(config.SERVO_GRIPPER, step if direction > 0 else -step)
+
     # ------------------------------------------------------------------ #
     # Named pose helpers                                                   #
     # ------------------------------------------------------------------ #

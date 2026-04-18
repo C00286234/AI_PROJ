@@ -35,13 +35,9 @@ class BehaviourEngine:
         self._state_entry_time: float = time.time()
         self._wave_step: int = 0
         self._pending_gesture: Optional[str] = None
-
-        self._rotate_direction: int = 0    # -1 for left, +1 for right, 0 for none
-        self._rotate_speed: int = 10      # degrees per second, adjust as needed
-
-    ## Custom Functions for Manual Movement
-    def rotate_base(self, direction: int):
-        self._rotate_direction = direction
+        self._manual_base_dir: int = 0
+        self._manual_middle_dir: int = 0
+        self._manual_gripper_dir: int = 0
 
     # ------------------------------------------------------------------ #
     # Public interface                                                   #
@@ -49,6 +45,12 @@ class BehaviourEngine:
 
     def trigger_gesture(self, gesture_name: str) -> None:
         self._pending_gesture = gesture_name
+
+    def set_manual_input(self, base_dir: int = 0, middle_dir: int = 0,
+                         gripper_dir: int = 0) -> None:
+        self._manual_base_dir = 1 if base_dir > 0 else -1 if base_dir < 0 else 0
+        self._manual_middle_dir = 1 if middle_dir > 0 else -1 if middle_dir < 0 else 0
+        self._manual_gripper_dir = 1 if gripper_dir > 0 else -1 if gripper_dir < 0 else 0
 
     def update(self) -> State:
         gesture = self._pending_gesture
@@ -74,9 +76,14 @@ class BehaviourEngine:
         elif self._state == State.BOWING:
             self._handle_bowing()
 
-        # Manual Mode
-        if self._rotate_direction !=0 and not self._arm.is_estopped():
-            self._arm.r
+        # Manual mode: continuous step control while command is held.
+        if self._state != State.EMERGENCY_STOP and not self._arm.is_estopped():
+            if self._manual_base_dir != 0:
+                self._arm.rotate_base_manual(self._manual_base_dir)
+            if self._manual_middle_dir != 0:
+                self._arm.move_middle_manual(self._manual_middle_dir)
+            if self._manual_gripper_dir != 0:
+                self._arm.move_gripper_manual(self._manual_gripper_dir)
 
         return self._state
 
