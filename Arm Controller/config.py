@@ -85,7 +85,26 @@ SERVO_MAX_SPEED = 370
 MOVE_COMPLETION_TIMEOUT = 2.5   # seconds
 
 # --- Gesture stability ---
-GESTURE_STABLE_FRAMES = 20   # consecutive identical detections required before firing
+GESTURE_STABLE_FRAMES = 60   # consecutive identical detections required before firing
+
+# --- Supported gesture labels ---
+SUPPORTED_GESTURES = [
+    "THUMBS_UP",
+    "THUMBS_DOWN",
+    "L_SHAPE",
+    "UPSIDE_DOWN_L_SHAPE",
+    "ONE_FINGER",
+    "TWO_FINGERS",
+    "THREE_FINGERS",
+    "FOUR_FINGERS",
+    "OPEN_PALM",
+    "FIST",
+    "DEVIL_HORNS",
+    "TELEPHONE",
+    # Existing aliases/legacy labels kept for compatibility.
+    "POINT",
+    "PEACE",
+]
 
 # --- Camera ---
 CAMERA_INDEX   = 0
@@ -99,4 +118,15 @@ GESTURE_BEHAVIOUR_MAP = {
     "PEACE":         "WAVE",
     "THUMBS_UP":     "BOW",
     "POINT":         "REACH",
+
+    # New gesture labels (can be re-mapped to behaviours any time).
+    "THUMBS_DOWN":        "NONE",
+    "L_SHAPE":            "NONE",
+    "UPSIDE_DOWN_L_SHAPE": "NONE",
+    "ONE_FINGER":         "REACH",   # alias for POINT
+    "TWO_FINGERS":        "WAVE",    # alias for PEACE
+    "THREE_FINGERS":      "NONE",
+    "FOUR_FINGERS":       "NONE",
+    "DEVIL_HORNS":        "NONE",
+    "TELEPHONE":          "NONE",
 }

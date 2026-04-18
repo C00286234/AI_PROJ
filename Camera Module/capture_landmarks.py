@@ -15,23 +15,32 @@
 import os
 import csv
 import time
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+ROOT_DIR = Path(__file__).resolve().parent.parent
+ARM_DIR = ROOT_DIR / "Arm Controller"
+arm_path = str(ARM_DIR)
+if arm_path not in sys.path:
+    sys.path.insert(0, arm_path)
+
+import config
+
 # Constants for model, gestures, and capture settings
-MODEL_PATH = "hand_landmarker.task"
+MODEL_PATH = Path("hand_landmarker.task")
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
 
-GESTURES = ["OPEN_PALM", "FIST", "PEACE", "THUMBS_UP", "POINT"]
+GESTURES = list(config.SUPPORTED_GESTURES)
 SAMPLES_PER_GESTURE = 200
 CAPTURE_DELAY = 0.1          # seconds between captures (~100 ms)
 CAMERA_INDEX = 0
-CSV_FILE = "gestures_dataset.csv"
+CSV_FILE = Path("gestures_dataset.csv")
 
 # 21 landmarks × 3 coords = 63 features
 HEADER = [f"lm{i}_{axis}" for i in range(21) for axis in ("x", "y", "z")] + ["label"]
@@ -41,7 +50,7 @@ def ensure_model():
     if not MODEL_PATH.exists():
         import urllib.request  # Import here to avoid dependency if model exists
         print("Downloading hand landmark model (~4 MB) ...")
-        urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
+        urllib.request.urlretrieve(MODEL_URL, str(MODEL_PATH))
         print(f"Model saved to {MODEL_PATH}")
 
 # Function to draw UI information on the video frame

@@ -108,10 +108,10 @@ class BehaviourEngine:
             return
         if gesture == "OPEN_PALM":
             self._transition(State.HOMING)
-        elif gesture == "PEACE":
+        elif gesture in ("PEACE", "TWO_FINGERS"):
             self._wave_step = 0
             self._transition(State.WAVING)
-        elif gesture == "POINT":
+        elif gesture in ("POINT", "ONE_FINGER"):
             self._transition(State.REACHING)
         elif gesture == "THUMBS_UP":
             self._transition(State.BOWING)
