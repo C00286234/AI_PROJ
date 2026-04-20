@@ -16,20 +16,38 @@ Camera -> MediaPipe (21 hand landmarks) -> SVM Classifier -> State Machine -> Ar
 
 ## Gestures and Behaviours
 
-| Gesture | Show this | Arm behaviour |
-|---------|-----------|---------------|
-| OPEN_PALM | All 5 fingers open, palm facing camera | Move to HOME position |
-| FIST | Make a fist | EMERGENCY STOP (from any state) |
-| PEACE | Peace sign (index + middle up) | WAVE sequence |
-| THUMBS_UP | Thumbs up | BOW |
-| POINT | Index finger only up | REACH forward |
+The system has two modes:
+
+- AUTOMATIC mode (default)
+- MANUAL mode
+
+Switch modes with:
+
+- `THUMBS_UP` -> AUTOMATIC
+- `OKAY_SIGN` -> MANUAL
+
+Automatic mode gestures:
+
+- `OPEN_PALM` -> HOME
+- `FIST` -> EMERGENCY STOP
+- `POINT` -> WAVE
+- `PEACE` -> REACH
+- `THREE_FINGERS` -> BOW
+
+Manual mode gestures:
+
+- `OPEN_PALM` -> GRIPPER OPEN
+- `FIST` -> GRIPPER CLOSE
+- `POINT` -> BASE RIGHT
+- `PEACE` -> BASE LEFT
+- `THREE_FINGERS` -> MIDDLE UP
 
 ## Setup
 
-### 1. Install dependencies
+### 1. Run Virtual Environment and Install dependencies via requirements script
 
 ```bash
-pip install mediapipe opencv-python numpy pandas scikit-learn pyserial
+pip install -r requirements.txt
 ```
 
 ### 2. Capture gesture training data
@@ -71,11 +89,10 @@ python "Camera Module/train_model.py"         # retrains on all data
 
 All tuneable values are in `Arm Controller/config.py`:
 
-- `SERIAL_PORT` — COM port for the arm (default: COM12)
+- `SERIAL_PORT` — COM port for the arm (default: COM5)
 - `CAMERA_INDEX` — camera index (default: 0)
-- `GESTURE_STABLE_FRAMES` — consecutive identical detections before a gesture fires (default: 1)
-- `INTERPOLATION_STEP` / `INTERPOLATION_DELAY` — movement smoothness
-- `DEFAULT_SPEED` / `FAST_SPEED` — servo movement speed
+- `GESTURE_STABLE_FRAMES` — consecutive identical detections before a gesture fires
+- `SERVO_MAX_SPEED` — servo speed setting
 - Servo limits and named poses
 
 ## Project Structure
@@ -106,6 +123,6 @@ AI_PROJ/
 
 - All servo positions are clamped to safe mechanical limits
 - FIST gesture triggers emergency stop from any state
-- Movement is interpolated in small steps to prevent LSS failsafe shutdown
+- Movement uses simple stepped commands with short delays
 - System runs in simulation mode if the arm is not connected
 - Graceful shutdown ensures the arm returns to HOME on exit

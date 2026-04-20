@@ -1,15 +1,6 @@
-###############################################################################
-# arm_controller.py — Low-level LSS servo control with safety guarantees
-#
-# Safety contract:
-#   1. Every position command passes through clamp() before reaching hardware.
-#   2. move_servo_smooth checks _estop on every interpolation tick (≤30 ms latency).
-#   3. Serial/hardware exceptions are caught, logged, and set _connected=False
-#      rather than crashing the main loop.
-###############################################################################
-
 import time
 import logging
+
 import config
 
 log = logging.getLogger(__name__)
@@ -47,15 +38,10 @@ class _FakeServo:
 
 class ArmController:
     def __init__(self):
-        self._servos: dict[int, object] = {}
-        self._current_positions: dict[int, int] = {sid: 0 for sid in config.ALL_SERVO_IDS}
-        self._connected: bool = False
-        self._estop: bool = False
-        self._carrying: bool = False    # True after successful pick-up lift
-
-    # ------------------------------------------------------------------ #
-    # Connection                                                           #
-    # ------------------------------------------------------------------ #
+        self._servos = {}
+        self._current_positions = {sid: 0 for sid in config.ALL_SERVO_IDS}
+        self._connected = False
+        self._estop = False
 
     def connect(self) -> bool:
         try:
@@ -67,19 +53,17 @@ class ArmController:
                 for sid in config.ALL_SERVO_IDS:
                     self._servos[sid] = _FakeServo(sid)
 
-            # Set each servo's built-in max speed (smooth motion handled on-servo)
             for sid in config.ALL_SERVO_IDS:
                 try:
                     self._servos[sid].setMaxSpeed(config.SERVO_MAX_SPEED)
-                except Exception as exc:
-                    log.warning("setMaxSpeed failed on servo %d: %s", sid, exc)
+                except Exception:
+                    pass
 
-            # Sync position cache from hardware
             for sid in config.ALL_SERVO_IDS:
                 self._current_positions[sid] = self.get_position(sid)
 
             self._connected = True
-            log.info("ArmController connected (simulation=%s)", not _LSS_AVAILABLE)
+            log.info("Arm connected")
             return True
 
         except Exception as exc:
@@ -91,6 +75,7 @@ class ArmController:
         if self._connected:
             try:
                 self.go_home()
+                time.sleep(0.3)
             except Exception:
                 pass
             try:
@@ -99,125 +84,85 @@ class ArmController:
             except Exception:
                 pass
         self._connected = False
-        log.info("ArmController disconnected")
+        log.info("Arm disconnected")
 
-    # ------------------------------------------------------------------ #
-    # Safety core                                                          #
-    # ------------------------------------------------------------------ #
-
-    def clamp(self, servo_id: int, position: int) -> int:
+    def clamp(self, servo_id, position):
         lo, hi = config.SERVO_LIMITS.get(servo_id, (-9999, 9999))
         return max(lo, min(hi, int(position)))
 
+    #
+    # Low level control methods
+    #
     def emergency_stop(self) -> None:
         self._estop = True
         for sid, servo in self._servos.items():
             try:
-                if _LSS_AVAILABLE:
-                    servo.hold()
-                log.warning("E-STOP: servo %d held", sid)
-            except Exception as exc:
-                log.error("E-STOP hold failed on servo %d: %s", sid, exc)
+                servo.hold()
+            except Exception:
+                pass
+        log.warning("Emergency stop")
 
     def clear_estop(self) -> None:
         self._estop = False
         log.info("E-stop cleared")
 
-    # ------------------------------------------------------------------ #
-    # Movement primitives                                                  #
-    # ------------------------------------------------------------------ #
-
-    def move_servo(self, servo_id: int, position: int) -> None:
-        """Issue a single move command (clamped). Non-blocking at hardware level."""
+    def move_servo(self, servo_id, position):
         if self._estop:
             return
         position = self.clamp(servo_id, position)
         try:
             self._servos[servo_id].move(position)
             self._current_positions[servo_id] = position
-        except Exception as exc:
-            log.error("move_servo(%d, %d) failed: %s", servo_id, position, exc)
+        except Exception:
             self._connected = False
 
-    def move_servo_smooth(self, servo_id: int, target: int) -> None:
-        """Move to target using the servo's built-in smooth motion controller.
-        One command, no software interpolation — the servo itself handles acceleration
-        and deceleration based on its configured max speed.
-        Blocks until the servo reports it has reached the target (or timeout)."""
+    def move_servo_smooth(self, servo_id, target):
         if self._estop:
             return
 
         target = self.clamp(servo_id, target)
-        current = self._current_positions.get(servo_id, 0)
+        self.move_servo(servo_id, target)
+        time.sleep(0.2)
 
-        if current == target:
-            return
-
-        try:
-            self._servos[servo_id].move(target)
-            self._current_positions[servo_id] = target
-        except Exception as exc:
-            log.error("move_servo_smooth(%d): %s", servo_id, exc)
-            self._connected = False
-            return
-
-        # Poll until servo reaches target or timeout expires.
-        # E-stop is also checked every poll tick for fast abort.
-        deadline = time.time() + config.MOVE_COMPLETION_TIMEOUT
-        while time.time() < deadline:
-            if self._estop:
-                log.info("move_servo_smooth: aborted by estop (servo %d)", servo_id)
-                return
-            try:
-                actual = int(self._servos[servo_id].getPosition())
-                if abs(actual - target) <= 20:   # close enough
-                    return
-            except Exception:
-                pass
-            time.sleep(0.05)
-
-    def move_pose_sequential(self, pose: dict, order: list) -> None:
-        """Move servos in a specified order (safety-critical for multi-joint moves).
-        Blocks until all servos reach their targets."""
+    def move_pose_sequential(self, pose, order):
         for sid in order:
             if sid in pose:
                 self.move_servo_smooth(sid, pose[sid])
             if self._estop:
                 return
 
-    def move_pose(self, pose: dict) -> None:
-        """Move all servos in pose using default safe order."""
+    def move_pose(self, pose):
         self.move_pose_sequential(pose, config.ALL_SERVO_IDS)
 
-    def nudge_servo(self, servo_id: int, delta: int) -> None:
-        """Move a servo by a small delta from its current position."""
+    #
+    # Manual control methods (for manual mode)
+    #
+    def nudge_servo(self, servo_id, delta):
         current = self._current_positions.get(servo_id, self.get_position(servo_id))
         self.move_servo(servo_id, current + int(delta))
 
-    def rotate_base_manual(self, direction: int, step: int = 18) -> None:
-        """Manual base control: direction -1 = left, +1 = right."""
+    def rotate_base_manual(self, direction, step=18):
         if direction == 0:
             return
         self.nudge_servo(config.SERVO_BASE, step if direction > 0 else -step)
+        time.sleep(0.05)
 
-    def move_middle_manual(self, direction: int, step: int = 18) -> None:
-        """Manual middle-joint control (bottom servo): -1 down, +1 up."""
+    def move_middle_manual(self, direction, step=18):
         if direction == 0:
             return
         self.nudge_servo(config.SERVO_MIDDLE, step if direction > 0 else -step)
+        time.sleep(0.05)
 
-    def move_gripper_manual(self, direction: int, step: int = 18) -> None:
-        """Manual gripper control: -1 open, +1 close."""
+    def move_gripper_manual(self, direction, step=18):
         if direction == 0:
             return
         self.nudge_servo(config.SERVO_GRIPPER, step if direction > 0 else -step)
+        time.sleep(0.05)
 
-    # ------------------------------------------------------------------ #
-    # Named pose helpers                                                   #
-    # ------------------------------------------------------------------ #
-
+    #
+    # Convenience methods for common poses and actions
+    #
     def go_home(self) -> None:
-        # Safe order: wrist first, then fold top, lower bottom, centre base
         self.move_pose_sequential(config.POSE_HOME,
                                   [config.SERVO_WRIST, config.SERVO_TOP,
                                    config.SERVO_MIDDLE, config.SERVO_BASE,
@@ -236,11 +181,7 @@ class ArmController:
         self.move_servo_smooth(config.SERVO_GRIPPER,
                                self.clamp(config.SERVO_GRIPPER, position))
 
-    # ------------------------------------------------------------------ #
-    # State queries                                                        #
-    # ------------------------------------------------------------------ #
-
-    def get_position(self, servo_id: int) -> int:
+    def get_position(self, servo_id):
         try:
             raw = self._servos[servo_id].getPosition()
             pos = int(raw) if raw is not None else self._current_positions.get(servo_id, 0)
@@ -249,7 +190,7 @@ class ArmController:
         except Exception:
             return self._current_positions.get(servo_id, 0)
 
-    def get_all_positions(self) -> dict:
+    def get_all_positions(self):
         return {sid: self.get_position(sid) for sid in config.ALL_SERVO_IDS}
 
     def is_connected(self) -> bool:
@@ -257,9 +198,3 @@ class ArmController:
 
     def is_estopped(self) -> bool:
         return self._estop
-
-    def set_carrying(self, value: bool) -> None:
-        self._carrying = value
-
-    def is_carrying(self) -> bool:
-        return self._carrying

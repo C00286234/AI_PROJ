@@ -61,17 +61,10 @@ POSE_WAVE_B = {
 
 POSE_REACH = {
     SERVO_BASE:      0,
-<<<<<<< HEAD:Arm Controller/config.py
-    SERVO_MIDDLE:  0,
-    SERVO_TOP:      0,
-    SERVO_WRIST:   0,
-    SERVO_GRIPPER:    100,
-=======
-    SERVO_BOTTOM:  -600,
+    SERVO_MIDDLE:  -600,
     SERVO_TOP:      600,
     SERVO_WRIST:   -100,
     SERVO_GRIPPER:    0,
->>>>>>> 019d89207508365bf95b0d3a320a23a2ad56d2ae:lss_gesture_arm/config.py
 }
 
 POSE_BOW = {

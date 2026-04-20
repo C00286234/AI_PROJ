@@ -1,475 +1,274 @@
-# Code Guide — Gesture-Controlled Lynxmotion LSS Robotic Arm
+# Code Guide - Gesture-Controlled Lynxmotion LSS Arm
 
-A complete walkthrough of every file in the project. The system uses a laptop camera to recognise hand gestures via MediaPipe, classifies them with a trained SVM model, and triggers behaviours on a Lynxmotion LSS 4-DoF robotic arm over serial.
+This guide reflects the current code in this repository as of April 20, 2026.
 
----
+## 1. What This Project Does
 
-## System Architecture
+The system reads hand gestures from a camera using MediaPipe HandLandmarker + an SVM classifier, then drives a Lynxmotion LSS arm through a behavior engine.
 
-```
-                    Laptop Camera (index 0)
-                           |
-                           v
-                  +-----------------+
-                  |  main.py        |  Main loop (~30 fps)
-                  |                 |
-                  |  Read frame     |
-                  |       |         |
-                  |       v         |
-                  |  gesture_       |
-                  |  recogniser.py  |
-                  |  (MediaPipe +   |
-                  |   trained SVM)  |
-                  |       |         |
-                  |  gesture name   |
-                  |       |         |
-                  |       v         |
-                  |  behaviours.py  |
-                  |  (state machine)|
-                  |       |         |
-                  |       v         |
-                  |  arm_           |
-                  |  controller.py  |
-                  |  (safety +      |
-                  |   serial cmds)  |
-                  +-----------------+
-                           |
-                    USB Serial (COM12)
-                           |
-                           v
-                  +-----------------+
-                  | Lynxmotion LSS  |
-                  | 5 servos:       |
-                  |  1=Base         |
-                  |  2=Bottom arm   |
-                  |  3=Top arm      |
-                  |  4=Wrist        |
-                  |  5=Gripper      |
-                  +-----------------+
+Runtime pipeline:
+
+```text
+Camera frame
+  -> GestureRecogniser (MediaPipe landmarks + SVM)
+  -> BehaviourEngine (mode + state logic)
+  -> ArmController (safety clamping + servo commands)
+  -> LSS bus (or FakeServo simulation)
 ```
 
----
+## 2. Current Project Layout
 
-## File Overview
+```text
+AI_PROJ/
+  main.py
+  hand_landmarker.task
+  README.md
+  requirements.txt
 
-| File | Purpose |
-|------|---------|
-| `config.py` | All constants: servo IDs, limits, poses, speeds, camera, gesture mapping |
-| `gesture_recogniser.py` | MediaPipe landmark detection + SVM classification + stability filter |
-| `behaviours.py` | 7-state machine mapping gestures to arm behaviours |
-| `arm_controller.py` | Servo communication with safety clamping and smooth interpolation |
-| `main.py` | Entry point: camera loop, gesture routing, HUD display |
-| `lss.py` | Lynxmotion serial protocol library (bundled, LGPL-3.0) |
-| `lss_const.py` | LSS protocol constants (bundled, LGPL-3.0) |
-| `capture_landmarks.py` | Data collection tool: captures MediaPipe landmarks to CSV |
-| `train_model.py` | Trains SVM classifier on captured landmarks, outputs model.pkl |
-| `gestures_dataset.csv` | Training data: 1000 samples (200 per gesture x 5 gestures) |
-| `model.pkl` | Trained SVM model + StandardScaler (loaded at runtime) |
-| `hand_landmarker.task` | MediaPipe hand landmark model (~4 MB, auto-downloaded on first run) |
+  Arm Controller/
+    arm_controller.py
+    behaviours.py
+    config.py
+    lss.py
+    lss_const.py
 
----
+  Camera Module/
+    capture_landmarks.py
+    gesture_recogniser.py
+    train_model.py
+    hand_landmarker.task
+    model+dataset/
+      gestures_dataset.csv
+      alt/
+        gestures_dataset.csv
+    alt/
 
-## 1. `config.py` — Constants
-
-All tuneable values live here. Nothing in this file changes at runtime.
-
-### Serial Connection
-```python
-SERIAL_PORT = "COM12"
-SERIAL_BAUD = 115200
-```
-The Windows COM port for the LSS arm's USB adapter. 115200 is the default LSS baud rate.
-
-### Servo IDs and Limits
-Each servo has a unique ID (1-5) and safe position limits in tenths-of-degrees:
-
-| Servo | ID | Min | Max | Notes |
-|-------|----|-----|-----|-------|
-| Base | 1 | -900 | 900 | Full rotation range |
-| Bottom | 2 | -900 | 0 | -900 = parallel to ground |
-| Top | 3 | 0 | 850 | 850 = parallel to bottom arm |
-| Wrist | 4 | -800 | 0 | -800 = straight up |
-| Gripper | 5 | 0 | 750 | 0 = open, 750 = fully closed |
-
-The `clamp()` function in `arm_controller.py` enforces these limits on every command.
-
-### Named Poses
-Pre-defined joint positions for common arm configurations:
-
-- **POSE_HOME** — Arm folded down, gripper open. Safe resting state.
-- **POSE_READY** — Arm raised to working height.
-- **POSE_WAVE_A / POSE_WAVE_B** — Two positions for the wave sequence (base swings left/right).
-- **POSE_DEMO** — A demonstration pose with partial gripper close.
-- **POSE_REACH** — Arm extended forward.
-- **POSE_BOW** — Arm lowered in a bow motion.
-
-### Movement Parameters
-```python
-DEFAULT_SPEED       = 50    # tenths-of-degrees per second
-FAST_SPEED          = 100   # used for wave / demo
-INTERPOLATION_STEP  = 5     # position delta per tick
-INTERPOLATION_DELAY = 0.1   # seconds between ticks
-```
-Movement is interpolated in small steps to avoid triggering the LSS built-in failsafe, which shuts the arm down if it receives a large position jump.
-
-### Gesture Settings
-```python
-GESTURE_STABLE_FRAMES = 1   # consecutive identical detections before firing
-```
-Set to 1 for immediate response. Increase to 5-8 for production to prevent accidental triggers.
-
-### Gesture-to-Behaviour Mapping
-```python
-GESTURE_BEHAVIOUR_MAP = {
-    "OPEN_PALM":     "HOME",
-    "FIST":          "EMERGENCY_STOP",
-    "PEACE":         "WAVE",
-    "THUMBS_UP":     "BOW",
-    "POINT":         "REACH",
-    "THREE_FINGERS": "DEMO_POSE",
-}
+  Docs/
+    CODE_GUIDE.md
 ```
 
----
+Notes:
+- `main.py` imports modules by appending `Arm Controller` and `Camera Module` to `sys.path`.
+- Runtime SVM model path is `Camera Module/model+dataset/model.pkl`.
+- Runtime hand landmark model path in code is `hand_landmarker.task` at repo root.
 
-## 2. `gesture_recogniser.py` — Gesture Detection
+## 3. Key Runtime Files
 
-This is the core AI component. It combines two models:
-1. **MediaPipe HandLandmarker** — a neural network that detects 21 hand landmarks (x, y, z coordinates) from a camera frame
-2. **Trained SVM classifier** — takes those 63 features (21 landmarks x 3 coords) and predicts which gesture is being shown
+### `main.py`
 
-### The ML Pipeline
+Responsibilities:
+- Initializes `ArmController`, `GestureRecogniser`, and `BehaviourEngine`.
+- Opens camera with dimensions from config (`640x480`).
+- Runs per-frame loop:
+1. Read frame.
+2. Get gesture from recogniser.
+3. Send gesture to behavior engine every frame.
+4. Update behavior engine.
+5. Draw landmarks + HUD + legend.
+6. Handle keyboard (`q` quit, `c` clear e-stop).
 
-```
-Camera frame (BGR)
-       |
-       v
-  Flip horizontally (mirror view)
-       |
-       v
-  Convert BGR -> RGB
-       |
-       v
-  MediaPipe HandLandmarker
-  (neural network, detects 21 hand landmarks)
-       |
-       v
-  21 landmarks -> flatten to 63 floats [x0, y0, z0, x1, y1, z1, ...]
-       |
-       v
-  StandardScaler.transform()  (normalise features, same scaling as training)
-       |
-       v
-  SVM.predict()  (trained on our captured hand data)
-       |
-       v
-  Raw gesture name (e.g. "POINT")
-       |
-       v
-  Stability filter (N consecutive identical frames required)
-       |
-       v
-  Stable gesture name -> passed to BehaviourEngine
-```
+Important behavior:
+- Default mode is automatic.
+- Gestures are forwarded continuously each frame (manual controls can be continuous while a gesture is held).
 
-### How the SVM Replaced Rule-Based Classification
+### `Arm Controller/config.py`
 
-Previously, `_classify()` used hand-coded rules checking which fingers were extended:
-```python
-# Old approach: if thumb up and all others down -> THUMBS_UP
-patterns = {"THUMBS_UP": [True, False, False, False, False], ...}
-```
+Single source of constants:
+- Serial: `SERIAL_PORT = "COM5"`, `SERIAL_BAUD = 115200`.
+- Servo IDs: base, middle, top, wrist, gripper (`1..5`).
+- Safety limits (`SERVO_LIMITS`) in tenths of degrees.
+- Named poses: `POSE_HOME`, `POSE_READY`, `POSE_WAVE_A`, `POSE_WAVE_B`, `POSE_REACH`, `POSE_BOW`.
+- Motion settings:
+  - `SERVO_MAX_SPEED = 370`
+  - `MOVE_COMPLETION_TIMEOUT = 2.5` (defined, not actively used by current arm motion code)
+- Gesture stability:
+  - `GESTURE_STABLE_FRAMES = 60`
+- Supported label set:
+  - `THUMBS_UP`, `OKAY_SIGN`, `THREE_FINGERS`, `OPEN_PALM`, `FIST`, `POINT`, `PEACE`
 
-Now, `_classify()` feeds the raw landmark coordinates into the trained SVM:
-```python
-# New approach: let the model decide based on training data
-features = [lm.x, lm.y, lm.z for each landmark]
-scaled = self._scaler.transform([features])
-name = self._svm.predict(scaled)[0]
-```
+Practical effect of stability:
+- At ~30 FPS, requiring 60 identical frames is about $60/30 = 2$ seconds before a stable gesture is emitted.
 
-The SVM approach is better because:
-- It learns from YOUR actual hand shapes, not generic geometric rules
-- It can capture subtle differences that simple up/down checks miss
-- Adding a new gesture only requires capturing more data and retraining
+### `Camera Module/gesture_recogniser.py`
 
-### Fallback
-If `model.pkl` is missing, the old rule-based logic is still present as a fallback so the system never fails to start.
+Responsibilities:
+- Creates MediaPipe HandLandmarker (Tasks API, VIDEO mode, `num_hands=1`).
+- Loads trained model bundle (`scaler` + `svm`) from `model.pkl`.
+- For each frame:
+1. Flip frame horizontally.
+2. Convert BGR to RGB.
+3. Detect hand landmarks.
+4. Flatten 21 landmarks to 63 features.
+5. Scale with `StandardScaler`.
+6. Predict label with SVM.
+7. Apply stability filter.
 
-### Stability Filter
-```python
-def _apply_stability(self, raw: str) -> None:
-    if raw == self._last_raw:
-        self._stable_count += 1
-    else:
-        self._stable_count = 1
-        self._last_raw = raw
+Output model:
+- Returns a `GestureResult` with:
+  - `name` (stable gesture)
+  - `raw_name` (instantaneous SVM output)
+  - `confidence` (currently fixed `1.0`)
+  - `landmarks`
 
-    if self._stable_count >= config.GESTURE_STABLE_FRAMES:
-        self._stable_gesture = raw
-```
-A gesture must be detected identically for `GESTURE_STABLE_FRAMES` consecutive frames before it fires. This prevents accidental triggers from transitional hand shapes.
+Failure behavior:
+- If `model.pkl` is missing, startup raises `FileNotFoundError` with retraining instruction.
+- If no hand is detected, stable output eventually returns `NONE`.
 
-### Drawing
-`draw_landmarks()` renders the hand skeleton and detected gesture name on the camera frame for the live display window.
+### `Arm Controller/behaviours.py`
 
----
+Contains:
+- State enum: `IDLE`, `HOMING`, `WAVING`, `REACHING`, `BOWING`, `EMERGENCY_STOP`
+- `BehaviourEngine` that handles:
+  - mode switching (automatic/manual)
+  - state transitions
+  - manual control actions
 
-## 3. `arm_controller.py` — Servo Control
+Mode logic:
+- `THUMBS_UP` -> automatic mode.
+- `OKAY_SIGN` -> manual mode.
 
-The only module that sends commands to the physical arm. Every position is safety-clamped before reaching hardware.
+Automatic mode actions (from `IDLE`, new gesture edge only):
+- `OPEN_PALM` -> `HOMING`
+- `POINT` -> `WAVING`
+- `PEACE` -> `REACHING`
+- `THREE_FINGERS` -> `BOWING`
 
-### Safety Contract
-1. Every position passes through `clamp()` — it is impossible to exceed safe limits
-2. `move_servo_smooth()` checks `_estop` on every interpolation tick
-3. Serial exceptions are caught and logged, never crash the main loop
+Manual mode actions (continuous while gesture is held):
+- `OPEN_PALM` -> gripper open step
+- `FIST` -> gripper close step
+- `POINT` -> base rotate right step
+- `PEACE` -> base rotate left step
+- `THREE_FINGERS` -> middle joint up step
 
-### Key Methods
+Emergency stop behavior:
+- `FIST` triggers e-stop only in automatic mode.
+- In `EMERGENCY_STOP`, `OPEN_PALM` clears e-stop and returns to `IDLE`.
 
-**`clamp(servo_id, position)`** — The most critical safety function:
-```python
-lo, hi = config.SERVO_LIMITS[servo_id]
-return max(lo, min(hi, int(position)))
-```
+### `Arm Controller/arm_controller.py`
 
-**`move_servo_smooth(servo_id, target, step, delay)`** — Interpolated movement:
-```
-current = -200, target = -700, step = 5
-Tick 1: send -205, sleep 0.1s
-Tick 2: send -210, sleep 0.1s
-...
-Final:  send -700, done
-```
-Each tick checks `_estop`. If emergency stop fires, the next tick aborts.
+Hardware abstraction and safety:
+- Connects to LSS bus if library is available.
+- Falls back to `_FakeServo` simulation if not available.
+- Clamps all servo targets through `SERVO_LIMITS`.
+- Supports:
+  - single servo movement
+  - sequential pose movement
+  - manual nudge controls
+  - e-stop hold/clear
 
-**`move_pose_sequential(pose, order, speed)`** — Moves servos one at a time in a specified order. The order matters for safety:
-- Wrist first when descending (prevent wrist hitting the table)
-- Bottom first when lifting (raise object off surface before folding)
+Important detail:
+- Current `move_servo_smooth` implementation sends target directly then sleeps `0.2s` (it is not multi-step interpolation in this version).
 
-**`emergency_stop()`** — Sends `hold()` to all 5 servos immediately, sets `_estop = True`.
+### `Arm Controller/lss.py` and `Arm Controller/lss_const.py`
 
-**`clear_estop()`** — Resets `_estop = False`. Only way to re-enable movement.
+Bundled Lynxmotion serial protocol implementation used by `arm_controller.py`.
 
-### Simulation Mode
-If the LSS library is not available (no arm connected), `_FakeServo` objects are used. The entire system runs identically in camera-only mode for development/testing.
+## 4. Data Collection and Training
 
----
+### `Camera Module/capture_landmarks.py`
 
-## 4. `behaviours.py` — State Machine
+Purpose:
+- Captures hand landmarks per gesture and appends rows to CSV.
 
-Coordinates gestures and arm movements through 7 states.
+Current settings:
+- Gesture set comes from `config.SUPPORTED_GESTURES`.
+- `SAMPLES_PER_GESTURE = 200`
+- `CAPTURE_DELAY = 0.1` seconds.
+- Output CSV path: `Camera Module/model+dataset/gestures_dataset.csv`.
 
-### States
-```python
-class State(Enum):
-    IDLE            # Waiting for gesture input
-    HOMING          # Moving to HOME position
-    WAVING          # Executing wave sequence (4 swings + home)
-    REACHING        # Extending arm forward
-    BOWING          # Performing bow motion
-    DEMO_POSE       # Showing demo position
-    EMERGENCY_STOP  # All servos held, waiting for OPEN_PALM to clear
-```
+Controls:
+- `SPACE` start capture for current gesture.
+- `S` skip gesture.
+- `Q` quit.
 
-### State Diagram
-```
-              FIST (from ANY state)
-                     |
-                     v
-              EMERGENCY_STOP
-                     |
-               OPEN_PALM
-                     |
-                     v
-    +-------------IDLE--------------+
-    |       |        |       |      |
- OPEN_PALM PEACE   POINT  THUMBS  THREE
-    |       |        |     _UP     _FINGERS
-    v       v        v      |       |
- HOMING  WAVING  REACHING  v       v
-    |       |        |    BOWING  DEMO_POSE
-    |   (4 swings)   |      |       |
-    |       |      (hold)  (hold)  (hold)
-    v       v      1 sec   1 sec   1 sec
-   IDLE    IDLE      |      |       |
-                  go_ready  |       |
-                     |      v       v
-                     v    IDLE    IDLE
-                   IDLE
-```
+### `Camera Module/train_model.py`
 
-### How It Works
+Purpose:
+- Trains an SVM classifier and writes `model.pkl`.
 
-`update()` is called once per frame from the main loop:
-1. Consume the pending gesture (set by `trigger_gesture()`)
-2. If FIST: emergency stop immediately (checked before anything else)
-3. Dispatch to the current state's handler
-4. Return current state for HUD display
+Pipeline:
+1. Load dataset CSV.
+2. Split 80/20 with stratification.
+3. Scale features with `StandardScaler`.
+4. Train `SVC(kernel="rbf", C=1, gamma="scale")`.
+5. Print accuracy, classification report, confusion matrix.
+6. Save `{ "scaler": scaler, "svm": svm }` with `pickle`.
 
-Each handler executes its behaviour (blocking arm movements) then transitions back to IDLE.
+## 5. Gesture Reference (Current Implementation)
 
----
+### Mode switching
 
-## 5. `main.py` — Entry Point
+| Gesture | Effect |
+|---|---|
+| `THUMBS_UP` | Switch to AUTOMATIC mode |
+| `OKAY_SIGN` | Switch to MANUAL mode |
 
-### Startup Sequence
-```
-1. Create ArmController, GestureRecogniser
-2. arm.connect()         -> serial connection (or simulation mode)
-3. recogniser.start()    -> MediaPipe + load SVM model
-4. Open camera           -> 640x480
-5. Create BehaviourEngine
-6. Enter main loop
-```
+### Automatic mode
 
-### Main Loop (runs at ~30 fps)
-```
-1. Read camera frame
-2. gesture_result = recogniser.process_frame(frame)
-3. If FIST:  trigger emergency stop
-   Else if not NONE: trigger the gesture's behaviour
-4. engine.update()  -> state machine runs one tick
-5. Draw hand skeleton + HUD overlay + gesture legend
-6. Display window
-7. Check Q (quit) or C (clear estop)
-```
+| Gesture | Effect |
+|---|---|
+| `FIST` | Emergency stop |
+| `OPEN_PALM` | Home pose |
+| `POINT` | Wave sequence |
+| `PEACE` | Reach sequence |
+| `THREE_FINGERS` | Bow sequence |
 
-### HUD Display
-- Top bar: current state (green=IDLE, orange=active, red=EMERGENCY_STOP)
-- Bottom: gesture-to-behaviour legend
-- Hand skeleton drawn with landmark dots and connections
+### Manual mode
 
-### Shutdown (finally block)
-```
-arm.disconnect()   -> go_home() then close serial
-recogniser.stop()  -> release MediaPipe
-cap.release()      -> release camera
-cv2.destroyAllWindows()
-```
-Runs even on exceptions/KeyboardInterrupt, ensuring the arm always returns home.
+| Gesture | Effect |
+|---|---|
+| `OPEN_PALM` | Gripper open (step) |
+| `FIST` | Gripper close (step) |
+| `POINT` | Base rotate right (step) |
+| `PEACE` | Base rotate left (step) |
+| `THREE_FINGERS` | Middle joint up (step) |
 
----
+## 6. Run Commands (From Repo Root)
 
-## 6. `lss.py` / `lss_const.py` — LSS Protocol
+Install deps:
 
-The official Lynxmotion Python library (LGPL-3.0), bundled because it is not on PyPI.
-
-### Protocol Format
-Commands sent to servos: `#<ID><COMMAND><VALUE>\r`
-- `#2D-500\r` = servo 2, move to position -500
-- `#1H\r` = servo 1, hold current position
-- `#3LED2\r` = servo 3, set LED to green
-
-### Key Methods Used
-- `LSS(id)` — create a servo object
-- `.move(pos)` — move to absolute position
-- `.hold()` — lock servo in place
-- `.getPosition()` — read current position
-- `initBus(port, baud)` / `closeBus()` — open/close serial connection
-
----
-
-## 7. `capture_landmarks.py` — Data Collection
-
-Collects training data by recording MediaPipe hand landmarks while you hold each gesture.
-
-### Usage
-```
-python capture_landmarks.py
-```
-
-### How It Works
-1. Cycles through all 6 gestures
-2. For each gesture: shows live camera preview with hand skeleton
-3. Press SPACE to start capturing — records 200 samples (~20 seconds)
-4. Each sample: MediaPipe extracts 21 landmarks -> flattened to 63 floats (x,y,z per landmark)
-5. Saved to `gestures_dataset.csv` with columns: `lm0_x, lm0_y, lm0_z, ..., lm20_z, label`
-
-### Controls
-- SPACE — start capturing (requires hand visible)
-- S — skip to next gesture
-- Q — quit early
-
-### Output
-`gestures_dataset.csv` — 1200 rows (200 per gesture), 64 columns (63 features + label). Appends if run again.
-
----
-
-## 8. `train_model.py` — Model Training
-
-Trains an SVM classifier on the captured landmark data.
-
-### Usage
-```
-python train_model.py
-```
-
-### Pipeline
-1. **Load** `gestures_dataset.csv`
-2. **Split** 80% train / 20% test (stratified by gesture)
-3. **Scale** features with `StandardScaler` (SVM requires normalised inputs)
-4. **Train** `SVC(kernel="rbf", C=10, gamma="scale")`
-5. **Evaluate** — prints accuracy, per-gesture precision/recall, confusion matrix
-6. **Save** scaler + SVM together as `model.pkl`
-
-### Why SVM?
-- Works well on small, structured datasets (1200 samples x 63 features)
-- RBF kernel handles non-linear gesture boundaries
-- Fast prediction at runtime (important for real-time ~30 fps loop)
-- Feature scaling via StandardScaler is saved alongside the model so the same transformation is applied at runtime
-
-### Output
-`model.pkl` — a pickle file containing `{"scaler": StandardScaler, "svm": SVC}`, loaded by `gesture_recogniser.py` on startup.
-
----
-
-## 9. How to Run the Full System
-
-### First Time Setup
 ```bash
-# 1. Install dependencies
-pip install mediapipe opencv-python numpy pandas scikit-learn
+pip install -r requirements.txt
+```
 
-# 2. Capture your gesture data
-python capture_landmarks.py
+Capture dataset:
 
-# 3. Train the model
-python train_model.py
+```bash
+python "Camera Module/capture_landmarks.py"
+```
 
-# 4. Run the system
+Train model:
+
+```bash
+python "Camera Module/train_model.py"
+```
+
+Run system:
+
+```bash
 python main.py
 ```
 
-### Re-training
-If gesture accuracy drops (different lighting, different person):
-```bash
-python capture_landmarks.py   # appends new data
-python train_model.py          # retrains on all data
-python main.py                 # uses updated model
-```
+Runtime keyboard controls:
+- `q` -> quit
+- `c` -> clear e-stop
 
-### Controls During Operation
-| Input | Action |
-|-------|--------|
-| OPEN_PALM gesture | Move arm to HOME position |
-| FIST gesture | Emergency stop (from any state) |
-| PEACE gesture | Wave sequence |
-| THUMBS_UP gesture | Bow |
-| POINT gesture | Reach forward |
-| THREE_FINGERS gesture | Demo pose |
-| Q key | Quit |
-| C key | Clear emergency stop |
+## 7. Safety Summary
 
----
+- Servo targets are clamped to configured mechanical limits.
+- E-stop calls `hold()` on all servos and blocks normal movement.
+- Disconnect path attempts to send arm home before closing bus.
+- Simulation fallback allows camera/logic testing without hardware.
 
-## 10. Safety Design
+## 8. Maintenance Notes
 
-Safety is layered at multiple levels:
+- If you add gestures, keep these in sync:
+1. `config.SUPPORTED_GESTURES`
+2. captured CSV labels
+3. trained model (`model.pkl`)
+4. behavior mapping logic in `behaviours.py`
+5. legend in `main.py`
 
-1. **Position clamping** — `clamp()` makes it impossible to exceed safe servo limits
-2. **Interpolated movement** — small steps prevent LSS failsafe shutdown
-3. **Emergency stop** — FIST gesture checked first on every frame, overrides any state
-4. **E-stop latency** — maximum 100ms (one interpolation tick) before movement halts
-5. **Sequential joint ordering** — prevents arm segments from colliding
-6. **Graceful shutdown** — `finally` block ensures arm goes home even on crash
-7. **Simulation mode** — system runs without arm connected for safe development
+- If module paths change, update both:
+1. `sys.path.append(...)` in `main.py`
+2. model/data path constants in camera scripts

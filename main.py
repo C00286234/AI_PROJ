@@ -11,21 +11,13 @@
 ###############################################################################
 
 import logging
-from pathlib import Path
 import sys
-import time
 
 import cv2
 import numpy as np
 
-ROOT_DIR = Path(__file__).resolve().parent
-ARM_DIR = ROOT_DIR / "Arm Controller"
-CAMERA_DIR = ROOT_DIR / "Camera Module"
-
-for module_dir in (ARM_DIR, CAMERA_DIR):
-    module_path = str(module_dir)
-    if module_path not in sys.path:
-        sys.path.insert(0, module_path)
+sys.path.append("Arm Controller")
+sys.path.append("Camera Module")
 
 import config
 from arm_controller import ArmController

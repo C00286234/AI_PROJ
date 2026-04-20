@@ -12,8 +12,13 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 
+import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
+
 import cv2
 import numpy as np
+
 import config
 
 log = logging.getLogger(__name__)
@@ -23,23 +28,8 @@ MODEL_URL  = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
-SVM_MODEL_PATH = "model.pkl"
+SVM_MODEL_PATH = "Camera Module/model+dataset/model.pkl"
 
-try:
-    import mediapipe as mp
-    from mediapipe.tasks import python as mp_python
-    from mediapipe.tasks.python import vision as mp_vision
-    _MP_AVAILABLE = True
-except ImportError:
-    log.warning("mediapipe not installed — GestureRecogniser in SIMULATION mode")
-    _MP_AVAILABLE = False
-
-# MediaPipe landmark indices
-_THUMB_TIP,  _THUMB_IP   = 4,  3
-_INDEX_TIP,  _INDEX_PIP  = 8,  6
-_MIDDLE_TIP, _MIDDLE_PIP = 12, 10
-_RING_TIP,   _RING_PIP   = 16, 14
-_PINKY_TIP,  _PINKY_PIP  = 20, 18
 
 # Connections used for drawing the hand skeleton
 _HAND_CONNECTIONS = [
@@ -74,20 +64,16 @@ class GestureRecogniser:
     # Lifecycle                                                            #
     # ------------------------------------------------------------------ #
 
-    def _ensure_model(self) -> None:
+    def start(self) -> None:
+        # Ensure model file exists (download if not)
         if not os.path.exists(MODEL_PATH):
             log.info("Downloading hand landmark model (~4 MB) ...")
             urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
             log.info("Model saved to %s", MODEL_PATH)
 
-    def start(self) -> None:
-        if not _MP_AVAILABLE:
-            log.info("GestureRecogniser: simulation mode (no MediaPipe)")
-            return
-
-        self._ensure_model()
         self._start_time_ms = int(time.time() * 1000)
 
+        # Initialize MediaPipe HandLandmarker with the Tasks API
         options = mp_vision.HandLandmarkerOptions(
             base_options=mp_python.BaseOptions(model_asset_path=MODEL_PATH),
             running_mode=mp_vision.RunningMode.VIDEO,
@@ -99,15 +85,17 @@ class GestureRecogniser:
         self._landmarker = mp_vision.HandLandmarker.create_from_options(options)
 
         # Load trained SVM classifier
-        if os.path.exists(SVM_MODEL_PATH):
-            with open(SVM_MODEL_PATH, "rb") as f:
-                bundle = pickle.load(f)
-            self._scaler = bundle["scaler"]
-            self._svm = bundle["svm"]
-            log.info("GestureRecogniser started (MediaPipe + trained SVM)")
-        else:
-            log.warning("No trained model found at %s — falling back to rules", SVM_MODEL_PATH)
-            log.info("GestureRecogniser started (MediaPipe Tasks API)")
+        if not os.path.exists(SVM_MODEL_PATH):
+            raise FileNotFoundError(
+                f"No trained model found at {SVM_MODEL_PATH}. "
+                "Run Camera Module/train_model.py first."
+            )
+
+        with open(SVM_MODEL_PATH, "rb") as f:
+            bundle = pickle.load(f)
+        self._scaler = bundle["scaler"]
+        self._svm = bundle["svm"]
+        log.info("GestureRecogniser started (MediaPipe + trained SVM)")
 
     def stop(self) -> None:
         if self._landmarker:
@@ -119,7 +107,7 @@ class GestureRecogniser:
     # ------------------------------------------------------------------ #
 
     def process_frame(self, bgr_frame: np.ndarray) -> GestureResult:
-        if not _MP_AVAILABLE or self._landmarker is None:
+        if self._landmarker is None:
             return GestureResult()
 
         # Mirror + convert to RGB
@@ -135,18 +123,16 @@ class GestureRecogniser:
             self._apply_stability("NONE")
             return GestureResult(name=self._stable_gesture)
 
-        landmarks  = detection.hand_landmarks[0]
-        handedness = (detection.handedness[0][0].category_name
-                      if detection.handedness else "Right")
+        landmarks = detection.hand_landmarks[0]
 
-        raw_name, conf = self._classify(landmarks, handedness)
+        raw_name, conf = self._classify(landmarks)
         self._apply_stability(raw_name)
 
         return GestureResult(
             name=self._stable_gesture,
             raw_name=raw_name,
             confidence=conf,
-            landmarks=landmarks,
+            landmarks=landmarks
         )
 
     # ------------------------------------------------------------------ #
@@ -169,73 +155,14 @@ class GestureRecogniser:
     # Landmark classification                                              #
     # ------------------------------------------------------------------ #
 
-    def _classify(self, landmarks, handedness: str) -> tuple:
-        if self._svm is not None:
-            # Trained SVM path: flatten landmarks into 63 features
-            features = []
-            for lm in landmarks:
-                features.extend([lm.x, lm.y, lm.z])
-            scaled = self._scaler.transform([features])
-            name = self._svm.predict(scaled)[0]
-            return self._canonical_label(name), 1.0
-
-        # Fallback: rule-based classification (used if model.pkl is missing)
-        lm = landmarks
-
-        def finger_extended(tip, pip) -> bool:
-            return lm[tip].y < lm[pip].y
-
-        def thumb_extended() -> bool:
-            if handedness == "Right":
-                return lm[_THUMB_TIP].x < lm[_THUMB_IP].x
-            return lm[_THUMB_TIP].x > lm[_THUMB_IP].x
-
-        def thumb_index_touching() -> bool:
-            dx = lm[_THUMB_TIP].x - lm[_INDEX_TIP].x
-            dy = lm[_THUMB_TIP].y - lm[_INDEX_TIP].y
-            dz = lm[_THUMB_TIP].z - lm[_INDEX_TIP].z
-            return (dx * dx + dy * dy + dz * dz) ** 0.5 < 0.08
-
-        thumb  = thumb_extended()
-        index  = finger_extended(_INDEX_TIP,  _INDEX_PIP)
-        middle = finger_extended(_MIDDLE_TIP, _MIDDLE_PIP)
-        ring   = finger_extended(_RING_TIP,   _RING_PIP)
-        pinky  = finger_extended(_PINKY_TIP,  _PINKY_PIP)
-
-        patterns = {
-            "OPEN_PALM":     [True,  True,  True,  True,  True ],
-            "FIST":          [False, False, False, False, False],
-            "PEACE":         [None,  True,  True,  False, False],
-            "THUMBS_UP":     [True,  False, False, False, False],
-            "POINT":         [None,  True,  False, False, False],
-            "THREE_FINGERS": [None,  True,  True,  True,  False],
-            "OKAY_SIGN":     [None,  None,  True,  True,  True ],
-        }
-        detected = [thumb, index, middle, ring, pinky]
-
-        best_name, best_score = "NONE", 0.0
-        for name, pattern in patterns.items():
-            score = sum(
-                1 for e, a in zip(pattern, detected) if e is None or e == a
-            ) / len(pattern)
-            if score > best_score:
-                best_score, best_name = score, name
-
-        if best_score < 0.8:
-            return "NONE", 0.0
-
-        # Require thumb/index contact to reduce OKAY_SIGN false positives.
-        if best_name == "OKAY_SIGN" and not thumb_index_touching():
-            return "NONE", 0.0
-
-        return self._canonical_label(best_name), best_score
-
-    def _canonical_label(self, name: str) -> str:
-        aliases = {
-            "ONE_FINGER": "POINT",
-            "TWO_FINGERS": "PEACE",
-        }
-        return aliases.get(name, name)
+    def _classify(self, landmarks) -> tuple:
+        # Trained SVM path: flatten landmarks into feautres
+        features = []
+        for lm in landmarks:
+            features.extend([lm.x, lm.y, lm.z])
+        scaled = self._scaler.transform([features])
+        name = self._svm.predict(scaled)[0]
+        return name, 1.0
 
     # ------------------------------------------------------------------ #
     # Drawing                                                              #

@@ -1,32 +1,6 @@
-###############################################################################
-# behaviours.py — Mode-aware state machine for high-level arm behaviours
-#
-# Modes:
-#   - AUTOMATIC (default on startup)
-#   - MANUAL
-#
-# Gesture rules:
-#   - FIST        -> EMERGENCY_STOP (automatic mode), GRIPPER_CLOSE (manual mode)
-#   - THUMBS_UP   -> AUTOMATIC mode
-#   - OKAY_SIGN   -> MANUAL mode
-#
-# AUTOMATIC mode:
-#   - OPEN_PALM     -> HOME (reset pose)
-#   - POINT         -> WAVE
-#   - PEACE         -> REACH
-#   - THREE_FINGERS -> BOW
-#
-# MANUAL mode (continuous while held):
-#   - OPEN_PALM           -> gripper open
-#   - POINT               -> base rotate right
-#   - PEACE               -> base rotate left
-#   - THREE_FINGERS       -> middle up
-###############################################################################
-
 import time
 import logging
 from enum import Enum, auto
-from typing import Optional
 
 import config
 from arm_controller import ArmController
@@ -46,84 +20,105 @@ class State(Enum):
 class BehaviourEngine:
     def __init__(self, arm: ArmController):
         self._arm = arm
-        self._state: State = State.IDLE
-        self._state_entry_time: float = time.time()
-        self._wave_step: int = 0
+        self._state = State.IDLE
+        self._state_entry_time = time.time()
+        self._wave_step = 0
+        self._pending_gesture = "NONE"
+        self._last_gesture = "NONE"
+        self._is_automatic_mode = True
 
-        self._pending_gesture: Optional[str] = None
-        self._last_gesture: str = "NONE"
-
-        self._is_automatic_mode: bool = True  # default startup mode
-
-        # Manual direction channels; keyboard/manual input can still set these.
-        self._manual_base_dir: int = 0
-        self._manual_middle_dir: int = 0
-        self._manual_gripper_dir: int = 0
-
-    # ------------------------------------------------------------------ #
-    # Public interface                                                   #
-    # ------------------------------------------------------------------ #
-
-    def trigger_gesture(self, gesture_name: str) -> None:
+    def trigger_gesture(self, gesture_name):
         self._pending_gesture = gesture_name or "NONE"
 
-    def set_manual_input(self, base_dir: int = 0, middle_dir: int = 0,
-                         gripper_dir: int = 0) -> None:
-        self._manual_base_dir = 1 if base_dir > 0 else -1 if base_dir < 0 else 0
-        self._manual_middle_dir = 1 if middle_dir > 0 else -1 if middle_dir < 0 else 0
-        self._manual_gripper_dir = 1 if gripper_dir > 0 else -1 if gripper_dir < 0 else 0
-
-    def update(self) -> State:
+    def update(self):
         gesture = self._pending_gesture or "NONE"
         self._pending_gesture = None
 
         is_new_gesture = gesture != self._last_gesture
         self._last_gesture = gesture
 
-        # FIST behavior:
-        # - AUTOMATIC mode: emergency stop
-        # - MANUAL mode: gripper close command
         if gesture == "FIST" and self._is_automatic_mode and self._state != State.EMERGENCY_STOP:
             self._arm.emergency_stop()
             self._transition(State.EMERGENCY_STOP)
             return self._state
 
-        # Mode switching gestures.
         if gesture == "THUMBS_UP":
-            self._set_mode_automatic()
+            self._is_automatic_mode = True
         elif gesture == "OKAY_SIGN":
-            self._set_mode_manual()
+            self._is_automatic_mode = False
 
         if self._state == State.EMERGENCY_STOP:
-            self._handle_estop(gesture)
-            self._reset_manual_dirs()
+            if gesture == "OPEN_PALM":
+                self._arm.clear_estop()
+                self._transition(State.IDLE)
             return self._state
 
         if self._state == State.IDLE:
-            self._handle_idle(gesture, is_new_gesture)
+            if self._is_automatic_mode:
+                if gesture == "OPEN_PALM" and is_new_gesture:
+                    self._transition(State.HOMING)
+                elif gesture == "POINT" and is_new_gesture:
+                    self._wave_step = 0
+                    self._transition(State.WAVING)
+                elif gesture == "PEACE" and is_new_gesture:
+                    self._transition(State.REACHING)
+                elif gesture == "THREE_FINGERS" and is_new_gesture:
+                    self._transition(State.BOWING)
+            else:
+                self._run_manual(gesture)
         elif self._state == State.HOMING:
-            self._handle_homing()
+            self._arm.go_home()
+            self._transition(State.IDLE)
         elif self._state == State.WAVING:
-            self._handle_waving()
+            wave_sequence = [
+                config.POSE_WAVE_A,
+                config.POSE_WAVE_B,
+                config.POSE_WAVE_A,
+                config.POSE_WAVE_B,
+                config.POSE_HOME
+            ]
+            if self._wave_step < len(wave_sequence):
+                self._arm.move_pose(wave_sequence[self._wave_step])
+                self._wave_step += 1
+            else:
+                self._transition(State.IDLE)
         elif self._state == State.REACHING:
-            self._handle_reaching()
+            self._arm.move_pose_sequential(
+                config.POSE_REACH,
+                [config.SERVO_WRIST, config.SERVO_TOP, config.SERVO_MIDDLE, config.SERVO_BASE],
+            )
+            time.sleep(1.0)
+            self._arm.go_ready()
+            self._transition(State.IDLE)
         elif self._state == State.BOWING:
-            self._handle_bowing()
-
-        # Manual mode is continuous while gesture/keys are held.
-        if not self._is_automatic_mode and not self._arm.is_estopped() and self._state == State.IDLE:
-            self._manual_from_gesture(gesture)
-
-        if self._state != State.EMERGENCY_STOP and not self._arm.is_estopped():
-            if self._manual_base_dir != 0:
-                self._arm.rotate_base_manual(self._manual_base_dir)
-            if self._manual_middle_dir != 0:
-                self._arm.move_middle_manual(self._manual_middle_dir)
-            if self._manual_gripper_dir != 0:
-                self._arm.move_gripper_manual(self._manual_gripper_dir)
+            self._arm.move_pose_sequential(
+                config.POSE_BOW,
+                [config.SERVO_WRIST, config.SERVO_TOP, config.SERVO_MIDDLE, config.SERVO_BASE],
+            )
+            time.sleep(1.0)
+            self._arm.go_ready()
+            self._transition(State.IDLE)
 
         return self._state
 
+    def _run_manual(self, gesture):
+        if self._arm.is_estopped():
+            return
+
+        if gesture == "OPEN_PALM":
+            self._arm.move_gripper_manual(-1)
+        elif gesture == "FIST":
+            self._arm.move_gripper_manual(1)
+        elif gesture == "POINT":
+            self._arm.rotate_base_manual(1)
+        elif gesture == "PEACE":
+            self._arm.rotate_base_manual(-1)
+        elif gesture == "THREE_FINGERS":
+            self._arm.move_middle_manual(1)
+            
+    #
+    # Helper methods for state management and manual control
+    #
     def get_state(self) -> State:
         return self._state
 
@@ -133,119 +128,9 @@ class BehaviourEngine:
     def get_mode_name(self) -> str:
         return "AUTOMATIC" if self._is_automatic_mode else "MANUAL"
 
-    # ------------------------------------------------------------------ #
-    # State handlers                                                       #
-    # ------------------------------------------------------------------ #
-
-    def _handle_estop(self, gesture: str) -> None:
-        if gesture == "OPEN_PALM":
-            self._arm.clear_estop()
-            log.info("E-stop cleared by OPEN_PALM")
-            self._transition(State.IDLE)
-
-    def _handle_idle(self, gesture: str, is_new_gesture: bool) -> None:
-        if gesture == "NONE":
-            if not self._is_automatic_mode:
-                self._reset_manual_dirs()
-            return
-
-        if self._is_automatic_mode:
-            if gesture == "OPEN_PALM" and is_new_gesture:
-                self._transition(State.HOMING)
-            elif gesture == "POINT" and is_new_gesture:
-                self._wave_step = 0
-                self._transition(State.WAVING)
-            elif gesture == "PEACE" and is_new_gesture:
-                self._transition(State.REACHING)
-            elif gesture == "THREE_FINGERS" and is_new_gesture:
-                self._transition(State.BOWING)
-            else:
-                self._reset_manual_dirs()
-
-    def _handle_homing(self) -> None:
-        self._arm.go_home()
-        self._transition(State.IDLE)
-
-    def _handle_waving(self) -> None:
-        wave_sequence = [
-            config.POSE_WAVE_A,
-            config.POSE_WAVE_B,
-            config.POSE_WAVE_A,
-            config.POSE_WAVE_B,
-            config.POSE_HOME,
-        ]
-        if self._wave_step < len(wave_sequence):
-            self._arm.move_pose(wave_sequence[self._wave_step])
-            self._wave_step += 1
-        else:
-            self._transition(State.IDLE)
-
-    def _handle_reaching(self) -> None:
-        self._arm.move_pose_sequential(
-            config.POSE_REACH,
-            [config.SERVO_WRIST, config.SERVO_TOP,
-             config.SERVO_MIDDLE, config.SERVO_BASE]
-        )
-        time.sleep(1.0)
-        self._arm.go_ready()
-        self._transition(State.IDLE)
-
-    def _handle_bowing(self) -> None:
-        self._arm.move_pose_sequential(
-            config.POSE_BOW,
-            [config.SERVO_WRIST, config.SERVO_TOP,
-             config.SERVO_MIDDLE, config.SERVO_BASE]
-        )
-        time.sleep(1.0)
-        self._arm.go_ready()
-        self._transition(State.IDLE)
-
-    # ------------------------------------------------------------------ #
-    # Manual helpers                                                       #
-    # ------------------------------------------------------------------ #
-
-    def _manual_from_gesture(self, gesture: str) -> None:
-        self._reset_manual_dirs()
-
-        if gesture == "OPEN_PALM":
-            self._manual_gripper_dir = -1
-        elif gesture == "FIST":
-            self._manual_gripper_dir = 1
-        elif gesture == "POINT":
-            self._manual_base_dir = 1
-        elif gesture == "PEACE":
-            self._manual_base_dir = -1
-        elif gesture == "THREE_FINGERS":
-            self._manual_middle_dir = 1
-
-    def _reset_manual_dirs(self) -> None:
-        self._manual_base_dir = 0
-        self._manual_middle_dir = 0
-        self._manual_gripper_dir = 0
-
-    def _switch_mode(self) -> None:
-        self._is_automatic_mode = not self._is_automatic_mode
-        if self._is_automatic_mode:
-            self._reset_manual_dirs()
-        log.info("Control mode -> %s", self.get_mode_name())
-
-    def _set_mode_automatic(self) -> None:
-        if not self._is_automatic_mode:
-            self._switch_mode()
-
-    def _set_mode_manual(self) -> None:
-        if self._is_automatic_mode:
-            self._switch_mode()
-
-    # ------------------------------------------------------------------ #
-    # Utilities                                                            #
-    # ------------------------------------------------------------------ #
 
     def _transition(self, new_state: State) -> None:
         if new_state != self._state:
             log.info("State: %s -> %s", self._state.name, new_state.name)
         self._state = new_state
         self._state_entry_time = time.time()
-
-    def _time_in_state(self) -> float:
-        return time.time() - self._state_entry_time
