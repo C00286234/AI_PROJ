@@ -5,7 +5,7 @@
 ###############################################################################
 
 # --- Serial ---
-SERIAL_PORT = "COM7"
+SERIAL_PORT = "COM5"
 SERIAL_BAUD = 115200  # lssc.LSS_DefaultBaud
 
 # --- Servo IDs ---
@@ -90,15 +90,10 @@ GESTURE_STABLE_FRAMES = 60   # consecutive identical detections required before 
 # --- Supported gesture labels ---
 SUPPORTED_GESTURES = [
     "THUMBS_UP",
-    "THUMBS_DOWN",
-    "L_SHAPE",
-    "UPSIDE_DOWN_L_SHAPE",
+    "OKAY_SIGN",
     "THREE_FINGERS",
-    "FOUR_FINGERS",
     "OPEN_PALM",
     "FIST",
-    "DEVIL_HORNS",
-    "TELEPHONE",
     "POINT",
     "PEACE",
 ]
@@ -111,17 +106,10 @@ FRAME_HEIGHT   = 480
 # --- Gesture → behaviour mapping ---
 GESTURE_BEHAVIOUR_MAP = {
     "OPEN_PALM":     "HOME / OPEN_GRIPPER (manual)",
-    "FIST":          "EMERGENCY_STOP",
+    "FIST":          "EMERGENCY_STOP (auto) / CLOSE_GRIPPER (manual)",
     "THUMBS_UP":     "MODE_AUTOMATIC",
-    "THUMBS_DOWN":   "MODE_MANUAL",
-    "POINT":         "WAVE (auto) / ROTATE_LEFT (manual)",
-    "PEACE":         "REACH (auto) / ROTATE_RIGHT (manual)",
-    "THREE_FINGERS": "BOW (auto)",
-    "L_SHAPE":       "MIDDLE_UP (manual)",
-    "UPSIDE_DOWN_L_SHAPE": "MIDDLE_DOWN (manual)",
-
-    # Other detected labels currently not mapped to robot actions.
-    "FOUR_FINGERS":       "NONE",
-    "DEVIL_HORNS":        "NONE",
-    "TELEPHONE":          "NONE",
+    "OKAY_SIGN":     "MODE_MANUAL",
+    "POINT":         "WAVE (auto) / ROTATE_RIGHT (manual)",
+    "PEACE":         "REACH (auto) / ROTATE_LEFT (manual)",
+    "THREE_FINGERS": "BOW (auto) / MIDDLE_UP (manual)",
 }

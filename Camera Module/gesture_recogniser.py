@@ -190,8 +190,11 @@ class GestureRecogniser:
                 return lm[_THUMB_TIP].x < lm[_THUMB_IP].x
             return lm[_THUMB_TIP].x > lm[_THUMB_IP].x
 
-        def thumb_down() -> bool:
-            return lm[_THUMB_TIP].y > lm[_THUMB_IP].y
+        def thumb_index_touching() -> bool:
+            dx = lm[_THUMB_TIP].x - lm[_INDEX_TIP].x
+            dy = lm[_THUMB_TIP].y - lm[_INDEX_TIP].y
+            dz = lm[_THUMB_TIP].z - lm[_INDEX_TIP].z
+            return (dx * dx + dy * dy + dz * dz) ** 0.5 < 0.08
 
         thumb  = thumb_extended()
         index  = finger_extended(_INDEX_TIP,  _INDEX_PIP)
@@ -206,10 +209,7 @@ class GestureRecogniser:
             "THUMBS_UP":     [True,  False, False, False, False],
             "POINT":         [None,  True,  False, False, False],
             "THREE_FINGERS": [None,  True,  True,  True,  False],
-            "FOUR_FINGERS":  [False, True,  True,  True,  True ],
-            "L_SHAPE":       [True,  True,  False, False, False],
-            "DEVIL_HORNS":   [None,  True,  False, False, True ],
-            "TELEPHONE":     [True,  False, False, False, True ],
+            "OKAY_SIGN":     [None,  None,  True,  True,  True ],
         }
         detected = [thumb, index, middle, ring, pinky]
 
@@ -224,12 +224,9 @@ class GestureRecogniser:
         if best_score < 0.8:
             return "NONE", 0.0
 
-        # Orientation-sensitive labels layered on top of finger-shape matches.
-        if best_name in ("THUMBS_UP", "L_SHAPE") and thumb_down() and not middle and not ring and not pinky:
-            return "THUMBS_DOWN", best_score
-
-        if best_name == "L_SHAPE" and thumb_down():
-            return "UPSIDE_DOWN_L_SHAPE", best_score
+        # Require thumb/index contact to reduce OKAY_SIGN false positives.
+        if best_name == "OKAY_SIGN" and not thumb_index_touching():
+            return "NONE", 0.0
 
         return self._canonical_label(best_name), best_score
 

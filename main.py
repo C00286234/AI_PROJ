@@ -2,11 +2,10 @@
 # main.py — Entry point for gesture-controlled Lynxmotion LSS robotic arm
 #
 # Controls:
-#   OPEN_PALM     → HOME position
-#   FIST          → EMERGENCY STOP
-#   PEACE         → WAVE sequence
-#   THUMBS UP     → BOW
-#   POINT         → REACH forward
+#   THUMBS_UP     → switch to AUTOMATIC mode
+#   OKAY_SIGN     → switch to MANUAL mode
+#   AUTO: POINT/PEACE/THREE_FINGERS → WAVE/REACH/BOW
+#   MANUAL: POINT/PEACE/FIST/OPEN_PALM/THREE_FINGERS
 #   Q key         → Quit cleanly
 #   C key         → Clear emergency stop
 ###############################################################################
@@ -44,12 +43,12 @@ _GESTURE_LEGEND = [
     ("AUTO: FIST",        "EMERGENCY STOP"),
     ("MANUAL: FIST",      "GRIPPER CLOSE"),
     ("THUMBS_UP",     "Switch -> AUTOMATIC"),
-    ("THUMBS_DOWN",   "Switch -> MANUAL"),
+    ("OKAY_SIGN",     "Switch -> MANUAL"),
     ("AUTO: OPEN_PALM",   "HOME"),
     ("AUTO: POINT/PEACE/3", "WAVE / REACH / BOW"),
-    ("MANUAL: L / inv-L",   "MIDDLE UP / DOWN"),
+    ("MANUAL: THREE_FINGERS", "MIDDLE UP"),
     ("MANUAL: OPEN_PALM",   "GRIPPER OPEN"),
-    ("MANUAL: POINT/PEACE", "ROTATE LEFT / RIGHT"),
+    ("MANUAL: POINT/PEACE", "ROTATE RIGHT / LEFT"),
 ]
 
 
