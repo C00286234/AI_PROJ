@@ -19,11 +19,13 @@ from mediapipe.tasks.python import vision as mp_vision
 import cv2
 import numpy as np
 
+import sys
+sys.path.append("Arm Controller")
 import config
 
 log = logging.getLogger(__name__)
 
-MODEL_PATH = "hand_landmarker.task"
+MODEL_PATH = "Camera Module/model+dataset/hand_landmarker.task"
 MODEL_URL  = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"

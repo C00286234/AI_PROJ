@@ -164,7 +164,7 @@ class ArmController:
             return
         
         target = self.clamp(config.SERVO_GRIPPER, 
-                            config.SERVO_LIMITS[config.Servo][1] if max_position is None else max_position)
+                            config.SERVO_LIMITS[config.SERVO_GRIPPER][1] if max_position is None else max_position)
         
         step = config.GRIPPER_CLOSE_STEP
         current_threshold = config.GRIPPER_CONTACT_CURRENT
@@ -184,7 +184,7 @@ class ArmController:
             time.sleep(poll_delay)
 
             status = self.get_servo_status(config.SERVO_GRIPPER)
-            if _LSS_AVAILABLE and status is (lssc.LSS_StatusStuck, lssc.LSS_StatusBlocked):
+            if _LSS_AVAILABLE and status in (lssc.LSS_StatusStuck, lssc.LSS_StatusBlocked):
                 log.warning("Gripper stop: status=%s at pos=%s", status, next_pos)
                 break
 

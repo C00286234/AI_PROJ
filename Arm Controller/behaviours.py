@@ -65,7 +65,7 @@ class BehaviourEngine:
                 elif gesture == "THREE_FINGERS" and is_new_gesture:
                     self._transition(State.BOWING)
             else:
-                self._run_manual(gesture)
+                self._run_manual(gesture, is_new_gesture)
         elif self._state == State.HOMING:
             self._arm.go_home()
             self._transition(State.IDLE)
@@ -101,14 +101,15 @@ class BehaviourEngine:
 
         return self._state
 
-    def _run_manual(self, gesture):
+    def _run_manual(self, gesture, is_new_gesture=False):
         if self._arm.is_estopped():
             return
 
         if gesture == "OPEN_PALM":
             self._arm.move_gripper_manual(-1)
         elif gesture == "FIST":
-            self._arm.move_gripper_manual(1)
+            if is_new_gesture:
+                self._arm.close_gripper_until_contact()
         elif gesture == "POINT":
             self._arm.rotate_base_manual(1)
         elif gesture == "PEACE":

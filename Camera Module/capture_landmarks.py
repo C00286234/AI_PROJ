@@ -13,15 +13,18 @@
 ###############################################################################
 
 import csv
+from pathlib import Path
 import time
 
 import cv2
 
+import sys
+sys.path.append("Arm Controller")
 import config
 
 
 # Constants for model, gestures, and capture settings
-MODEL_PATH = "hand_landmarker.task"
+MODEL_PATH = Path("Camera Module/model+dataset/hand_landmarker.task")
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/"
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
@@ -31,7 +34,7 @@ GESTURES = list(config.SUPPORTED_GESTURES)
 SAMPLES_PER_GESTURE = 200
 CAPTURE_DELAY = 0.1          # seconds between captures (~100 ms)
 CAMERA_INDEX = 0
-CSV_FILE = "Camera Module/model+dataset/gestures_dataset.csv"
+CSV_FILE = Path("Camera Module/model+dataset/gestures_dataset.csv")
 
 # 21 landmarks × 3 coords = 63 features
 HEADER = [f"lm{i}_{axis}" for i in range(21) for axis in ("x", "y", "z")] + ["label"]
