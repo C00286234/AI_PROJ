@@ -84,6 +84,12 @@ SERVO_MAX_SPEED = 370
 # Must be long enough for the slowest movement to finish.
 MOVE_COMPLETION_TIMEOUT = 2.5   # seconds
 
+# --- Gripper contact-safe close ---
+GRIPPER_CLOSE_STEP = 10
+GRIPPER_CONTACT_CURRENT = 350
+GRIPPER_CONTACT_CONSECUTIVE = 5
+GRIPPER_POLL_DELAY = 0.05
+
 # --- Gesture stability ---
 GESTURE_STABLE_FRAMES = 60   # consecutive identical detections required before firing
 
@@ -91,11 +97,12 @@ GESTURE_STABLE_FRAMES = 60   # consecutive identical detections required before 
 SUPPORTED_GESTURES = [
     "THUMBS_UP",
     "OKAY_SIGN",
+    "POINT",
+    "PEACE",
     "THREE_FINGERS",
     "OPEN_PALM",
     "FIST",
-    "POINT",
-    "PEACE",
+    "DEVIL_HORNS"
 ]
 
 # --- Camera ---
@@ -112,4 +119,5 @@ GESTURE_BEHAVIOUR_MAP = {
     "POINT":         "WAVE (auto) / ROTATE_RIGHT (manual)",
     "PEACE":         "REACH (auto) / ROTATE_LEFT (manual)",
     "THREE_FINGERS": "BOW (auto) / MIDDLE_UP (manual)",
+    "DEVIL_HORNS":   "MIDDLE_DOWN (manual)"
 }

@@ -141,13 +141,13 @@ class ArmController:
         current = self._current_positions.get(servo_id, self.get_position(servo_id))
         self.move_servo(servo_id, current + int(delta))
 
-    def rotate_base_manual(self, direction, step=18):
+    def rotate_base_manual(self, direction, step=10):
         if direction == 0:
             return
         self.nudge_servo(config.SERVO_BASE, step if direction > 0 else -step)
         time.sleep(0.05)
 
-    def move_middle_manual(self, direction, step=18):
+    def move_middle_manual(self, direction, step=10):
         if direction == 0:
             return
         self.nudge_servo(config.SERVO_MIDDLE, step if direction > 0 else -step)
@@ -158,6 +158,50 @@ class ArmController:
             return
         self.nudge_servo(config.SERVO_GRIPPER, step if direction > 0 else -step)
         time.sleep(0.05)
+
+    def close_gripper_until_contact(self, max_position=None):
+        if self._estop:
+            return
+        
+        target = self.clamp(config.SERVO_GRIPPER, 
+                            config.SERVO_LIMITS[config.Servo][1] if max_position is None else max_position)
+        
+        step = config.GRIPPER_CLOSE_STEP
+        current_threshold = config.GRIPPER_CONTACT_CURRENT
+        consecutive_required = config.GRIPPER_CONTACT_CONSECUTIVE
+        poll_delay = config.GRIPPER_POLL_DELAY
+
+        consecutive_over_current = 0
+
+        while not self._estop:
+            current_pos = self.get_position(config.SERVO_GRIPPER)
+            if current_pos >= target:
+                log.info("Gripper fully closed without contact.")
+                break
+
+            next_pos = min(current_pos + step, target)
+            self.move_servo(config.SERVO_GRIPPER, next_pos)
+            time.sleep(poll_delay)
+
+            status = self.get_servo_status(config.SERVO_GRIPPER)
+            if _LSS_AVAILABLE and status is (lssc.LSS_StatusStuck, lssc.LSS_StatusBlocked):
+                log.warning("Gripper stop: status=%s at pos=%s", status, next_pos)
+                break
+
+            current = self.get_servo_current(config.SERVO_GRIPPER)
+            if current is not None and current >= current_threshold:
+                consecutive_over_current += 1
+                if consecutive_over_current >= consecutive_required:
+                    log.info("Gripper contact detected at pos %s with current %s", next_pos, current)
+                    break
+            else:
+                consecutive_over_current = 0
+
+        try:
+            self._servos[config.SERVO_GRIPPER].hold()
+        except Exception:
+            pass
+
 
     #
     # Convenience methods for common poses and actions
@@ -178,8 +222,8 @@ class ArmController:
         self.move_servo_smooth(config.SERVO_GRIPPER, 0)
 
     def gripper_close(self, position: int = 600) -> None:
-        self.move_servo_smooth(config.SERVO_GRIPPER,
-                               self.clamp(config.SERVO_GRIPPER, position))
+        self.close_gripper_until_contact(position)
+        log.debug("Gripper Current =%s status=%s at pos=%s", self.get_servo_current(config.SERVO_GRIPPER), self.get_servo_status(config.SERVO_GRIPPER), self.get_position(config.SERVO_GRIPPER))
 
     def get_position(self, servo_id):
         try:
@@ -198,3 +242,22 @@ class ArmController:
 
     def is_estopped(self) -> bool:
         return self._estop
+    
+    def get_servo_current(self, servo_id):
+        if not _LSS_AVAILABLE:
+            return None
+        try:
+            raw = self._servos[servo_id].getCurrent()
+            return int(raw) if raw is not None else None
+        except Exception:
+            return None
+        
+    def get_servo_status(self, servo_id):
+        if not _LSS_AVAILABLE:
+            return None
+        try:
+            raw = self._servos[servo_id].getStatus()
+            return int(raw) if raw is not None else None
+        except Exception:
+            return None
+        
