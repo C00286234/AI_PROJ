@@ -32,15 +32,16 @@ logging.basicConfig(
 log = logging.getLogger("main")
 
 _GESTURE_LEGEND = [
-    ("AUTO: FIST",        "EMERGENCY STOP"),
-    ("MANUAL: FIST",      "GRIPPER CLOSE"),
     ("THUMBS_UP",     "Switch -> AUTOMATIC"),
     ("OKAY_SIGN",     "Switch -> MANUAL"),
+    ("AUTO: FIST",        "EMERGENCY STOP"),
     ("AUTO: OPEN_PALM",   "HOME"),
     ("AUTO: POINT/PEACE/3", "WAVE / REACH / BOW"),
-    ("MANUAL: THREE_FINGERS", "MIDDLE UP"),
+    ("MANUAL: FIST",      "GRIPPER CLOSE"),
     ("MANUAL: OPEN_PALM",   "GRIPPER OPEN"),
     ("MANUAL: POINT/PEACE", "ROTATE RIGHT / LEFT"),
+    ("MANUAL: THREE_FINGERS", "MIDDLE UP"),
+    ("MANUAL: DEVIL_HORNS", "MIDDLE DOWN")
 ]
 
 

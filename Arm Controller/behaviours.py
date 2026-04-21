@@ -50,7 +50,7 @@ class BehaviourEngine:
         if self._state == State.EMERGENCY_STOP:
             if gesture == "OPEN_PALM":
                 self._arm.clear_estop()
-                self._transition(State.IDLE)
+                self._transition(State.HOMING)
             return self._state
 
         if self._state == State.IDLE:
@@ -115,7 +115,9 @@ class BehaviourEngine:
             self._arm.rotate_base_manual(-1)
         elif gesture == "THREE_FINGERS":
             self._arm.move_middle_manual(1)
-            
+        elif gesture == "DEVIL_HORNS":
+            self._arm.move_middle_manual(-1)
+
     #
     # Helper methods for state management and manual control
     #
